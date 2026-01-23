@@ -121,6 +121,10 @@ app.post("/", async (req, res) => {
 
     console.log("Получен update:", JSON.stringify(msg, null, 2));
 
+console.log("BOT_TOKEN:", BOT_TOKEN ? "OK" : "НЕ ПОДХВАТИЛСЯ");
+console.log("GEMINI_KEY:", GEMINI_KEY ? "OK" : "НЕ ПОДХВАТИЛСЯ");
+
+    
     if (msg.text === "/start") {
       return send(
         chatId,
