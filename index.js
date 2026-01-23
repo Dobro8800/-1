@@ -2,15 +2,16 @@ import express from "express";
 import axios from "axios";
 import sqlite3 from "sqlite3";
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const GEMINI_KEY = process.env.GEMINI_KEY;
-
+// ===== Environment Variables =====
+const BOT_TOKEN = process.env.BOT_TOKEN;  // Telegram token
+const GEMINI_KEY = process.env.GEMINI_KEY; // Gemini AI key
 
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
-const app = express();
-app.use(express.json());
 
-// ===== БАЗА =====
+const app = express();
+app.use(express.json({ limit: "20mb" }));
+
+// ===== Database =====
 const db = new sqlite3.Database("./users.db");
 db.run(`
 CREATE TABLE IF NOT EXISTS users (
@@ -20,10 +21,10 @@ CREATE TABLE IF NOT EXISTS users (
 )
 `);
 
-// ===== ВРЕМЕННОЕ СОСТОЯНИЕ =====
+// ===== Temporary user state =====
 const state = {}; // { userId: { products } }
 
-// ===== ВСПОМОГАТЕЛЬНЫЕ =====
+// ===== Helper functions =====
 function send(chatId, text, keyboard = null) {
   return axios.post(`${TELEGRAM_API}/sendMessage`, {
     chat_id: chatId,
@@ -48,7 +49,7 @@ function isActive(user) {
   return user.subscribed && user.until > Date.now();
 }
 
-// ===== КНОПКИ =====
+// ===== Keyboards =====
 function dietKeyboard(sub) {
   return {
     inline_keyboard: [
@@ -72,7 +73,7 @@ function paywall(chatId) {
   );
 }
 
-// ===== GEMINI =====
+// ===== Gemini AI =====
 async function generateRecipe(products, diet, premium) {
   const dietMap = {
     normal: "обычное домашнее питание",
@@ -107,16 +108,18 @@ ${premium ? "КБЖУ в конце" : ""}
   return res.data.candidates[0].content.parts[0].text;
 }
 
-// ===== WEBHOOK =====
+// ===== Webhook =====
 app.post("/", async (req, res) => {
   const update = req.body;
-  res.send("ok"); // ВАЖНО: сразу отвечаем Telegram
+  res.send("ok"); // сразу подтверждаем Telegram
 
-  // ===== СООБЩЕНИЯ =====
+  // ===== Message handling =====
   if (update.message) {
     const msg = update.message;
     const chatId = msg.chat.id;
     const userId = msg.from.id;
+
+    console.log("Получен update:", JSON.stringify(msg, null, 2));
 
     if (msg.text === "/start") {
       return send(
@@ -125,14 +128,14 @@ app.post("/", async (req, res) => {
       );
     }
 
-    if (msg.text) {
+    if (msg.text && msg.text.includes(",")) {
       state[userId] = { products: msg.text };
       const user = await getUser(userId);
       return send(chatId, "🍽 Выбери тип питания:", dietKeyboard(isActive(user)));
     }
   }
 
-  // ===== КНОПКИ =====
+  // ===== Callback buttons =====
   if (update.callback_query) {
     const cb = update.callback_query;
     const chatId = cb.message.chat.id;
@@ -162,6 +165,6 @@ app.post("/", async (req, res) => {
   }
 });
 
-// ===== СТАРТ =====
+// ===== Server start =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Bot running"));
