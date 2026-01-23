@@ -24,12 +24,10 @@ const state = {}; // { userId: { products } }
 
 // ===== Вспомогательные функции =====
 function send(chatId, text, keyboard = null) {
-  return axios.post(`${TELEGRAM_API}/sendMessage`, {
-    chat_id: chatId,
-    text,
-    parse_mode: "HTML",
-    reply_markup: keyboard
-  }).catch(e => console.error("Ошибка sendMessage:", e.response?.data || e.message));
+  const payload = { chat_id: chatId, text, parse_mode: "HTML" };
+  if (keyboard) payload.reply_markup = keyboard; // только если есть объект
+  return axios.post(`${TELEGRAM_API}/sendMessage`, payload)
+    .catch(e => console.error("Ошибка sendMessage:", e.response?.data || e.message));
 }
 
 function getUser(id) {
@@ -48,7 +46,7 @@ function isActive(user) {
 }
 
 // ===== Кнопки выбора питания =====
-function dietKeyboard(sub) {
+function dietKeyboard(sub = false) {
   return {
     inline_keyboard: [
       [
@@ -113,8 +111,9 @@ ${premium ? "КБЖУ в конце" : ""}
 // ===== Webhook =====
 app.post("/", async (req, res) => {
   const update = req.body;
-  res.send("ok"); // подтверждаем Telegram сразу
+  res.send("ok"); // сразу подтверждаем Telegram
 
+  // ===== Message handling =====
   if (update.message) {
     const msg = update.message;
     const chatId = msg.chat.id;
@@ -129,11 +128,11 @@ app.post("/", async (req, res) => {
       );
     }
 
-    // Если сообщение содержит продукты через запятую
+    // Продукты через запятую
     if (msg.text && msg.text.includes(",")) {
       state[userId] = { products: msg.text };
       const user = await getUser(userId);
-      return send(chatId, "🍽 Выбери тип питания:", dietKeyboard(isActive(user)));
+      return send(chatId, "🍽 Выбери тип питания:", dietKeyboard(isActive(user) || false));
     }
   }
 
