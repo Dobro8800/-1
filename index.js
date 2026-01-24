@@ -16,7 +16,12 @@ const YANDEX_FOLDER_ID = process.env.YANDEX_FOLDER_ID;
 const state = {}; 
 // state[userId] = { products }
 
-// ===== TELEGRAM =====
+// ===== HEALTH CHECK =====
+app.get("/", (req, res) => {
+  res.send("OK");
+});
+
+// ===== TELEGRAM SEND =====
 async function send(chatId, text, keyboard = null) {
   const payload = {
     chat_id: chatId,
@@ -28,6 +33,7 @@ async function send(chatId, text, keyboard = null) {
   await axios.post(`${TELEGRAM_API}/sendMessage`, payload);
 }
 
+// ===== KEYBOARD =====
 function dietKeyboard() {
   return {
     inline_keyboard: [
@@ -105,7 +111,7 @@ async function generateRecipe(products, diet) {
 }
 
 // ===== WEBHOOK =====
-app.post("/", async (req, res) => {
+app.post("/webhook", async (req, res) => {
   res.send("ok");
   const update = req.body;
 
@@ -179,10 +185,15 @@ app.post("/", async (req, res) => {
       return send(chatId, recipe);
     }
   } catch (e) {
-    console.error("ERROR:", e.response?.data || e.message);
+    console.error(
+      "ERROR:",
+      e.response?.data || e.message
+    );
   }
 });
 
 // ===== START =====
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Bot started"));
+app.listen(PORT, () => {
+  console.log("Bot started on port", PORT);
+});
