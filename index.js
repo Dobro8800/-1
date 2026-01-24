@@ -6,15 +6,21 @@ app.use(express.json({ limit: "20mb" }));
 
 // ===== ENV =====
 const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) throw new Error("BOT_TOKEN is not defined in environment variables");
+
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 const YANDEX_GPT_API_KEY = process.env.YANDEX_GPT_API_KEY;
+if (!YANDEX_GPT_API_KEY) throw new Error("YANDEX_GPT_API_KEY is not defined");
+
 const YANDEX_STT_API_KEY = process.env.YANDEX_STT_API_KEY;
+if (!YANDEX_STT_API_KEY) throw new Error("YANDEX_STT_API_KEY is not defined");
+
 const YANDEX_FOLDER_ID = process.env.YANDEX_FOLDER_ID;
+if (!YANDEX_FOLDER_ID) throw new Error("YANDEX_FOLDER_ID is not defined");
 
 // ===== USER STATE =====
-const state = {}; 
-// state[userId] = { products }
+const state = {}; // state[userId] = { products, chatId } — добавим chatId для надёжности
 
 // ===== HEALTH CHECK =====
 app.get("/", (req, res) => {
@@ -30,7 +36,12 @@ async function send(chatId, text, keyboard = null) {
   };
   if (keyboard) payload.reply_markup = keyboard;
 
-  await axios.post(`${TELEGRAM_API}/sendMessage`, payload);
+  try {
+    await axios.post(`${TELEGRAM_API}/sendMessage`, payload);
+  } catch (error) {
+    console.error("Failed to send message:", error.response?.data || error.message);
+    throw error; // Пусть обработается в webhook
+  }
 }
 
 // ===== KEYBOARD =====
@@ -52,22 +63,32 @@ function dietKeyboard() {
 
 // ===== SPEECHKIT STT =====
 async function speechToText(oggBuffer) {
-  const res = await axios.post(
-    "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
-    oggBuffer,
-    {
-      headers: {
-        Authorization: `Api-Key ${YANDEX_STT_API_KEY}`,
-        "Content-Type": "audio/ogg"
-      },
-      params: {
-        folderId: YANDEX_FOLDER_ID,
-        lang: "ru-RU"
+  try {
+    const res = await axios.post(
+      "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
+      oggBuffer,
+      {
+        headers: {
+          Authorization: `Api-Key ${YANDEX_STT_API_KEY}`,
+          "Content-Type": "audio/ogg"
+        },
+        params: {
+          folderId: YANDEX_FOLDER_ID,
+          lang: "ru-RU"
+        },
+        timeout: 10000 // Защита от зависания
       }
-    }
-  );
+    );
 
-  return res.data.result;
+    if (!res.data.result) {
+      throw new Error("Yandex STT returned empty result");
+    }
+
+    return res.data.result.trim();
+  } catch (error) {
+    console.error("STT Error:", error.response?.data || error.message);
+    throw new Error("Не удалось распознать речь. Попробуйте повторить.");
+  }
 }
 
 // ===== YANDEX GPT 5.1 =====
@@ -91,36 +112,50 @@ async function generateRecipe(products, diet) {
 КБЖУ
 `;
 
-  const res = await axios.post(
-    "https://llm.api.cloud.yandex.net/foundationModels/v1/chat/completions",
-    {
-      model: "yandexgpt-5.1",
-      messages: [{ role: "user", text: prompt }],
-      temperature: 0.6,
-      maxTokens: 600
-    },
-    {
-      headers: {
-        Authorization: `Api-Key ${YANDEX_GPT_API_KEY}`,
-        "x-folder-id": YANDEX_FOLDER_ID
+  try {
+    const res = await axios.post(
+      "https://llm.api.cloud.yandex.net/foundationModels/v1/chat/completions",
+      {
+        model: "yandexgpt-5.1",
+        messages: [{ role: "user", text: prompt }],
+        temperature: 0.6,
+        maxTokens: 600
+      },
+      {
+        headers: {
+          Authorization: `Api-Key ${YANDEX_GPT_API_KEY}`,
+          "x-folder-id": YANDEX_FOLDER_ID,
+          "Content-Type": "application/json"
+        },
+        timeout: 15000
       }
-    }
-  );
+    );
 
-  return res.data.result.alternatives[0].message.text;
+    const response = res.data;
+    if (!response.result?.alternatives?.[0]?.message?.text) {
+      throw new Error("Yandex GPT returned invalid response structure");
+    }
+
+    return response.result.alternatives[0].message.text.trim();
+  } catch (error) {
+    console.error("GPT Error:", error.response?.data || error.message);
+    throw new Error("Не удалось сгенерировать рецепт. Попробуйте позже.");
+  }
 }
 
 // ===== WEBHOOK =====
 app.post("/webhook", async (req, res) => {
-  res.send("ok");
-  const update = req.body;
-
   try {
+    const update = req.body;
+
+    // Ответ Telegram сразу — чтобы не таймаутить
+    res.send("ok");
+
     // ===== TEXT =====
     if (update.message?.text) {
       const chatId = update.message.chat.id;
       const userId = update.message.from.id;
-      const text = update.message.text;
+      const text = update.message.text.trim();
 
       if (text === "/start") {
         return send(
@@ -130,7 +165,7 @@ app.post("/webhook", async (req, res) => {
       }
 
       if (text.includes(",")) {
-        state[userId] = { products: text };
+        state[userId] = { products: text, chatId }; // Сохраняем chatId на случай ошибки
         return send(chatId, "🍽 Выбери тип питания:", dietKeyboard());
       }
     }
@@ -154,7 +189,7 @@ app.post("/webhook", async (req, res) => {
 
       const text = await speechToText(audioRes.data);
 
-      state[userId] = { products: text };
+      state[userId] = { products: text, chatId };
 
       return send(
         chatId,
@@ -170,6 +205,7 @@ app.post("/webhook", async (req, res) => {
       const userId = cb.from.id;
       const diet = cb.data.replace("diet_", "");
 
+      // Проверяем, есть ли пользователь в состоянии
       if (!state[userId]) {
         return send(chatId, "❗ Пришли продукты заново");
       }
@@ -181,14 +217,15 @@ app.post("/webhook", async (req, res) => {
         diet
       );
 
-      delete state[userId];
+      delete state[userId]; // Очистка состояния
       return send(chatId, recipe);
     }
-  } catch (e) {
-    console.error(
-      "ERROR:",
-      e.response?.data || e.message
-    );
+
+    // Если ничего не обработано — всё равно OK
+  } catch (error) {
+    console.error("WEBHOOK ERROR:", error.response?.data || error.message || error);
+    // Не отправляем ошибку в ответ — Telegram ждёт 200 OK
+    // Логируем и игнорируем, чтобы не ломать вебхук
   }
 });
 
