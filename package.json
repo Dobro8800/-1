@@ -1,15 +1,16 @@
 {
-  "name": "chef-bot",
+  "name": "telegram-recipe-bot",
   "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": "18.x"
-    "@a2seven/yoo-checkout": "^1.4.2"
-
+  },
+  "scripts": {
+    "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.7",
     "express": "^4.18.2",
-    "sqlite3": "^5.1.6"
+    "axios": "^1.6.0",
+    "@a2seven/yoo-checkout": "^1.4.2"
   }
 }
