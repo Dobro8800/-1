@@ -11,6 +11,6 @@
   "dependencies": {
     "express": "^4.18.2",
     "axios": "^1.6.0",
-    "yookassa": "^2.4.0"
+    "sqlite3": "^5.1.6"
   }
 }
