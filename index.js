@@ -93,6 +93,25 @@ const personsKeyboard = {
     ]
   ]
 };
+/* ================= KITCHEN MENU ================= */
+
+const kitchenEntryKeyboard = {
+  keyboard: [[{ text: "🍽 На кухню" }]],
+  resize_keyboard: true,
+  one_time_keyboard: false
+};
+
+const kitchenMenuKeyboard = {
+  keyboard: [
+    [{ text: "🍳 Новый рецепт" }],
+    [{ text: "💡 Совет дня" }, { text: "👤 Профиль" }],
+    [{ text: "💳 Подписка" }, { text: "ℹ️ Помощь" }],
+    [{ text: "⬅️ Назад" }]
+  ],
+  resize_keyboard: true,
+  one_time_keyboard: false
+};
+
 
 function afterRecipeKeyboard(hasSub) {
   if (!hasSub) {
@@ -190,6 +209,69 @@ app.post("/webhook", async (req, res) => {
   res.send("ok");
   const u = req.body;
 
+    /* ================= KITCHEN BUTTONS ================= */
+
+  if (u.message?.text) {
+    const chatId = u.message.chat.id;
+
+    if (u.message.text === "🍽 На кухню") {
+      return send(
+        chatId,
+        "👨‍🍳 Добро пожаловать на кухню НейроШефа!\nВыбирай, чем займёмся 👇",
+        kitchenMenuKeyboard
+      );
+    }
+
+    if (u.message.text === "🍳 Новый рецепт") {
+      return send(
+        chatId,
+        "🍳 Пришли продукты — текстом через запятую или голосовым сообщением",
+        kitchenEntryKeyboard
+      );
+    }
+
+    if (u.message.text === "💡 Совет дня") {
+      return send(
+        chatId,
+        "💡 Совет от НейроШефа: пробуй блюдо на каждом этапе приготовления 😉",
+        kitchenEntryKeyboard
+      );
+    }
+
+    if (u.message.text === "👤 Профиль") {
+      return send(
+        chatId,
+        "👤 Профиль НейроШефа\n\nЗдесь скоро появится статистика и история рецептов 👨‍🍳",
+        kitchenEntryKeyboard
+      );
+    }
+
+    if (u.message.text === "💳 Подписка") {
+      return send(
+        chatId,
+        "💳 Подписка НейроШефа\n\nОткрывает ПП, похудение и неограниченные рецепты 🔥",
+        kitchenEntryKeyboard
+      );
+    }
+
+    if (u.message.text === "ℹ️ Помощь") {
+      return send(
+        chatId,
+        "ℹ️ Как пользоваться ботом:\n\n1️⃣ Нажми «Новый рецепт»\n2️⃣ Пришли продукты\n3️⃣ Следуй подсказкам НейроШефа 👨‍🍳",
+        kitchenEntryKeyboard
+      );
+    }
+
+    if (u.message.text === "⬅️ Назад") {
+      return send(
+        chatId,
+        "🍽 Ты снова на кухне. Чем займёмся?",
+        kitchenEntryKeyboard
+      );
+    }
+  }
+
+
   if (u.message?.text) {
     const chatId = u.message.chat.id;
     const userId = u.message.from.id;
@@ -203,7 +285,9 @@ app.post("/webhook", async (req, res) => {
 ✍️ текстом через запятую  
 🎙 или голосовым сообщением  
 
-Я сам подберу лучший рецепт 👌`
+Я сам подберу лучший рецепт 👌`, 
+        kitchenEntryKeyboard
+
       );
     }
 
