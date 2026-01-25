@@ -1,7 +1,6 @@
 import express from "express";
 import axios from "axios";
 import sqlite3 from "sqlite3";
-import YooCheckout from "@a2seven/yoo-checkout";
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
@@ -10,7 +9,6 @@ app.use(express.json({ limit: "20mb" }));
 const {
   BOT_TOKEN,
   YANDEX_GPT_API_KEY,
-  YANDEX_STT_API_KEY,
   YANDEX_FOLDER_ID,
   YOOKASSA_SHOP_ID,
   YOOKASSA_SECRET_KEY,
@@ -29,12 +27,6 @@ db.serialize(() => {
       until INTEGER
     )
   `);
-});
-
-/* ================= YOOKASSA ================= */
-const checkout = new YooCheckout({
-  shopId: YOOKASSA_SHOP_ID,
-  secretKey: YOOKASSA_SECRET_KEY
 });
 
 /* ================= STATE ================= */
@@ -155,17 +147,32 @@ async function generateRecipe(data) {
 
 /* ================= PAYMENT ================= */
 async function createPayment(userId) {
-  const payment = await checkout.createPayment({
+  const data = {
     amount: { value: "349.00", currency: "RUB" },
-    confirmation: {
-      type: "redirect",
-      return_url: "https://t.me/your_bot"
-    },
+    confirmation: { type: "redirect", return_url: "https://t.me/your_bot" },
+    capture: true,
     description: "Подписка на рецепты (30 дней)",
     metadata: { userId }
-  });
+  };
 
-  return payment.confirmation.confirmation_url;
+  const auth = Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET_KEY}`).toString("base64");
+
+  try {
+    const res = await axios.post(
+      "https://api.yookassa.ru/v3/payments",
+      data,
+      {
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    return res.data.confirmation.confirmation_url;
+  } catch (err) {
+    console.error("Ошибка при создании платежа:", err.response?.data || err.message);
+    throw new Error("Не удалось создать платеж");
+  }
 }
 
 /* ================= WEBHOOKS ================= */
@@ -205,9 +212,7 @@ app.post("/webhook", async (req, res) => {
     const chatId = message.chat.id;
     const userId = from.id;
 
-    await axios.post(`${TG}/answerCallbackQuery`, {
-      callback_query_id: id
-    });
+    await axios.post(`${TG}/answerCallbackQuery`, { callback_query_id: id });
 
     const sub = await hasSubscription(userId);
 
