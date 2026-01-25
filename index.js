@@ -114,12 +114,14 @@ async function generateRecipe(products, diet) {
 
   try {
     const res = await axios.post(
-      "https://llm.api.cloud.yandex.net/foundationModels/v1/chat/completions",
+      "https://llm.api.cloud.yandex.net/foundationModels/v1/textGeneration",
       {
-        model: "yandexgpt-5.1",
+        modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt-5.1`,
         messages: [{ role: "user", text: prompt }],
-        temperature: 0.6,
-        maxTokens: 600
+        completionOptions: {
+          temperature: 0.6,
+          maxTokens: 600
+        }
       },
       {
         headers: {
