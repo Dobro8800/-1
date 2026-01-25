@@ -9,6 +9,7 @@ app.use(express.json({ limit: "20mb" }));
 const {
   BOT_TOKEN,
   YANDEX_GPT_API_KEY,
+  YANDEX_STT_API_KEY,
   YANDEX_FOLDER_ID,
   YOOKASSA_SHOP_ID,
   YOOKASSA_SECRET_KEY,
@@ -19,7 +20,6 @@ const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 /* ================= DB ================= */
 const db = new sqlite3.Database("./db.sqlite");
-
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS subscriptions (
@@ -145,6 +145,33 @@ async function generateRecipe(data) {
   return res.data.result.alternatives[0].message.text;
 }
 
+/* ================= YANDEX STT ================= */
+async function recognizeVoice(fileId) {
+  // Получаем ссылку на файл Telegram
+  const fileRes = await axios.get(`${TG}/getFile?file_id=${fileId}`);
+  const filePath = fileRes.data.result.file_path;
+  const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+
+  // Скачиваем аудио
+  const audioRes = await axios.get(fileUrl, { responseType: "arraybuffer" });
+  const audioData = audioRes.data;
+
+  // Отправляем в Yandex STT
+  const res = await axios.post(
+    "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
+    audioData,
+    {
+      headers: {
+        "Authorization": `Api-Key ${YANDEX_STT_API_KEY}`,
+        "Content-Type": "application/octet-stream"
+      },
+      params: { lang: "ru-RU" }
+    }
+  );
+
+  return res.data.result; // текст распознавания
+}
+
 /* ================= PAYMENT ================= */
 async function createPayment(userId) {
   const data = {
@@ -180,11 +207,7 @@ app.post("/yookassa", (req, res) => {
   if (req.body.event === "payment.succeeded") {
     const userId = req.body.object.metadata.userId;
     const until = Date.now() + 30 * 24 * 60 * 60 * 1000;
-
-    db.run(
-      `INSERT OR REPLACE INTO subscriptions VALUES (?, ?)`,
-      [userId, until]
-    );
+    db.run(`INSERT OR REPLACE INTO subscriptions VALUES (?, ?)`, [userId, until]);
   }
   res.send("ok");
 });
@@ -193,27 +216,32 @@ app.post("/yookassa", (req, res) => {
 app.post("/webhook", async (req, res) => {
   res.send("ok");
   const u = req.body;
+  const chatId = u.message?.chat?.id;
+  const userId = u.message?.from?.id;
 
+  /* ==== Голосовое сообщение ==== */
+  if (u.message?.voice) {
+    const text = await recognizeVoice(u.message.voice.file_id);
+    state[userId] = { products: text };
+    return send(chatId, "🍽 Тип питания:", dietKeyboard);
+  }
+
+  /* ==== Текстовое сообщение ==== */
   if (u.message?.text) {
-    const chatId = u.message.chat.id;
-    const userId = u.message.from.id;
     const text = u.message.text;
-
-    if (text === "/start") {
-      return send(chatId, "👨‍🍳 Пришли продукты через запятую");
-    }
+    if (text === "/start") return send(chatId, "👨‍🍳 Пришли продукты через запятую");
 
     state[userId] = { products: text };
     return send(chatId, "🍽 Тип питания:", dietKeyboard);
   }
 
+  /* ==== Callback query ==== */
   if (u.callback_query) {
     const { id, data, from, message } = u.callback_query;
     const chatId = message.chat.id;
     const userId = from.id;
 
     await axios.post(`${TG}/answerCallbackQuery`, { callback_query_id: id });
-
     const sub = await hasSubscription(userId);
 
     if (data.startsWith("diet_")) {
@@ -237,9 +265,7 @@ app.post("/webhook", async (req, res) => {
       return send(chatId, recipe, afterRecipeKeyboard(sub));
     }
 
-    if (data === "again") {
-      return send(chatId, "🍽 Пришли продукты заново");
-    }
+    if (data === "again") return send(chatId, "🍽 Пришли продукты заново");
 
     if (data === "paywall") {
       const url = await createPayment(userId);
