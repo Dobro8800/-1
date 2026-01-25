@@ -258,6 +258,40 @@ async function processUpdate(update) {
 
 // ===== START =====
 const PORT = process.env.PORT || 3000;
+
+// Добавьте в index.js перед app.listen
+app.get('/debug-yandex', async (req, res) => {
+  console.log('Folder ID:', process.env.YANDEX_FOLDER_ID);
+  console.log('API Key exists:', !!process.env.YANDEX_GPT_API_KEY);
+  
+  try {
+    const response = await axios.post(
+      'https://llm.api.cloud.yandex.net/foundationModels/v1/completion',
+      {
+        modelUri: `gpt://${process.env.YANDEX_FOLDER_ID}/yandexgpt-lite`,
+        messages: [{ role: 'user', text: 'Тест связи' }]
+      },
+      {
+        headers: {
+          'Authorization': `Api-Key ${process.env.YANDEX_GPT_API_KEY}`,
+          'x-folder-id': process.env.YANDEX_FOLDER_ID
+        }
+      }
+    );
+    
+    res.json({ status: 'success', data: response.data });
+  } catch (error) {
+    res.json({ 
+      status: 'error', 
+      error: error.response?.data || error.message,
+      details: {
+        folderId: process.env.YANDEX_FOLDER_ID,
+        apiKeyLength: process.env.YANDEX_GPT_API_KEY?.length
+      }
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log("Bot started on port", PORT);
 });
