@@ -116,7 +116,7 @@ async function generateRecipe(data) {
 Время готовки: ${data.time}
 Персон: ${data.persons}
 
-Сделай ОДИН рецепт.
+Сделай ОДИН рецепт. Используй те ингредиенты, которые нужны для рецепта. Можно исключить ингредиенты, которые не подходят, если это улучшает рецепт.
 Формат:
 
 <b>Название</b>
@@ -147,16 +147,13 @@ async function generateRecipe(data) {
 
 /* ================= YANDEX STT ================= */
 async function recognizeVoice(fileId) {
-  // Получаем ссылку на файл Telegram
   const fileRes = await axios.get(`${TG}/getFile?file_id=${fileId}`);
   const filePath = fileRes.data.result.file_path;
   const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
 
-  // Скачиваем аудио
   const audioRes = await axios.get(fileUrl, { responseType: "arraybuffer" });
   const audioData = audioRes.data;
 
-  // Отправляем в Yandex STT
   const res = await axios.post(
     "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
     audioData,
@@ -169,7 +166,7 @@ async function recognizeVoice(fileId) {
     }
   );
 
-  return res.data.result; // текст распознавания
+  return res.data.result;
 }
 
 /* ================= PAYMENT ================= */
@@ -223,13 +220,14 @@ app.post("/webhook", async (req, res) => {
   if (u.message?.voice) {
     const text = await recognizeVoice(u.message.voice.file_id);
     state[userId] = { products: text };
+    await send(chatId, `Вы сказали: ${text}`);
     return send(chatId, "🍽 Тип питания:", dietKeyboard);
   }
 
   /* ==== Текстовое сообщение ==== */
   if (u.message?.text) {
     const text = u.message.text;
-    if (text === "/start") return send(chatId, "👨‍🍳 Пришли продукты через запятую");
+    if (text === "/start") return send(chatId, "👨‍🍳 Пришлите продукты через запятую или голосовым сообщением");
 
     state[userId] = { products: text };
     return send(chatId, "🍽 Тип питания:", dietKeyboard);
@@ -265,7 +263,7 @@ app.post("/webhook", async (req, res) => {
       return send(chatId, recipe, afterRecipeKeyboard(sub));
     }
 
-    if (data === "again") return send(chatId, "🍽 Пришли продукты заново");
+    if (data === "again") return send(chatId, "🍽 Пришлите продукты заново");
 
     if (data === "paywall") {
       const url = await createPayment(userId);
