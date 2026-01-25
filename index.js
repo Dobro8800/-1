@@ -1,112 +1,137 @@
 import express from "express";
 import axios from "axios";
+import sqlite3 from "sqlite3";
+import YooCheckout from "@a2seven/yoo-checkout";
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
 
-// ===== ENV =====
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+/* ================= ENV ================= */
+const {
+  BOT_TOKEN,
+  YANDEX_GPT_API_KEY,
+  YANDEX_STT_API_KEY,
+  YANDEX_FOLDER_ID,
+  YOOKASSA_SHOP_ID,
+  YOOKASSA_SECRET_KEY,
+  PORT = 3000
+} = process.env;
 
-const YANDEX_GPT_API_KEY = process.env.YANDEX_GPT_API_KEY;
-const YANDEX_STT_API_KEY = process.env.YANDEX_STT_API_KEY;
-const YANDEX_FOLDER_ID = process.env.YANDEX_FOLDER_ID;
+const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-if (!BOT_TOKEN || !YANDEX_GPT_API_KEY || !YANDEX_STT_API_KEY || !YANDEX_FOLDER_ID) {
-  throw new Error("ENV variables are missing");
-}
+/* ================= DB ================= */
+const db = new sqlite3.Database("./db.sqlite");
 
-// ===== USER STATE =====
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      user_id INTEGER PRIMARY KEY,
+      until INTEGER
+    )
+  `);
+});
+
+/* ================= YOOKASSA ================= */
+const checkout = new YooCheckout({
+  shopId: YOOKASSA_SHOP_ID,
+  secretKey: YOOKASSA_SECRET_KEY
+});
+
+/* ================= STATE ================= */
 const state = {};
-const subscriptions = {}; // mock подписок
 
-// ===== HEALTH =====
-app.get("/", (_, res) => res.send("OK"));
-
-// ===== SEND MESSAGE =====
+/* ================= HELPERS ================= */
 async function send(chatId, text, keyboard = null) {
   const payload = { chat_id: chatId, text, parse_mode: "HTML" };
   if (keyboard) payload.reply_markup = keyboard;
-  await axios.post(`${TELEGRAM_API}/sendMessage`, payload);
+  await axios.post(`${TG}/sendMessage`, payload);
 }
 
-// ===== KEYBOARDS =====
-const dietKeyboard = () => ({
+function hasSubscription(userId) {
+  return new Promise(resolve => {
+    db.get(
+      `SELECT until FROM subscriptions WHERE user_id=?`,
+      [userId],
+      (err, row) => {
+        resolve(row && row.until > Date.now());
+      }
+    );
+  });
+}
+
+/* ================= KEYBOARDS ================= */
+const dietKeyboard = {
   inline_keyboard: [
-    [{ text: "🥘 Обычное", callback_data: "diet_normal" }],
-    [{ text: "🥗 ПП", callback_data: "diet_healthy" }],
+    [
+      { text: "🥘 Обычное", callback_data: "diet_normal" },
+      { text: "🥗 ПП", callback_data: "diet_healthy" }
+    ],
     [{ text: "🌱 Веган", callback_data: "diet_vegan" }],
     [
       { text: "🔥 Похудеть 🔒", callback_data: "diet_slim" },
       { text: "⚡ Быстро 🔒", callback_data: "diet_fast" }
     ]
   ]
-});
+};
 
-const timeKeyboard = () => ({
-  inline_keyboard: [
-    [
-      { text: "⚡ До 15 мин", callback_data: "time_15" },
-      { text: "⏱ До 30 мин", callback_data: "time_30" }
-    ],
-    [{ text: "🍳 До 60 мин", callback_data: "time_60" }]
-  ]
-});
-
-const personsKeyboard = () => ({
-  inline_keyboard: [
-    [
-      { text: "👤 1", callback_data: "p_1" },
-      { text: "👥 2", callback_data: "p_2" },
-      { text: "👨‍👩‍👧‍👦 4", callback_data: "p_4" }
+function timeKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "⏱ до 15 мин", callback_data: "time_15" },
+        { text: "⏱ до 30 мин", callback_data: "time_30" }
+      ],
+      [{ text: "⏱ до 60 мин", callback_data: "time_60" }]
     ]
-  ]
-});
-
-const againKeyboard = (hasSub) => ({
-  inline_keyboard: [
-    hasSub
-      ? [{ text: "🔁 Другой рецепт", callback_data: "again" }]
-      : [{ text: "🔒 Другой рецепт (подписка)", callback_data: "paywall" }]
-  ]
-});
-
-// ===== STT =====
-async function speechToText(buffer) {
-  const res = await axios.post(
-    "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
-    buffer,
-    {
-      headers: {
-        Authorization: `Api-Key ${YANDEX_STT_API_KEY}`,
-        "Content-Type": "audio/ogg"
-      },
-      params: { folderId: YANDEX_FOLDER_ID, lang: "ru-RU" }
-    }
-  );
-  return res.data.result;
+  };
 }
 
-// ===== GPT =====
+function personsKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "👤 1", callback_data: "p_1" },
+        { text: "👥 2", callback_data: "p_2" }
+      ],
+      [
+        { text: "👨‍👩‍👧 3", callback_data: "p_3" },
+        { text: "👨‍👩‍👧‍👦 4", callback_data: "p_4" }
+      ]
+    ]
+  };
+}
+
+function afterRecipeKeyboard(hasSub) {
+  if (!hasSub) {
+    return {
+      inline_keyboard: [
+        [{ text: "🔒 Другой рецепт (подписка)", callback_data: "paywall" }]
+      ]
+    };
+  }
+  return {
+    inline_keyboard: [
+      [{ text: "🔁 Другой рецепт", callback_data: "again" }]
+    ]
+  };
+}
+
+/* ================= YANDEX GPT ================= */
 async function generateRecipe(data) {
   const prompt = `
-Ты профессиональный повар.
-
 Продукты: ${data.products}
 Тип питания: ${data.diet}
-Максимальное время готовки: ${data.time} минут
-Количество персон: ${data.persons}
+Время готовки: ${data.time}
+Персон: ${data.persons}
 
 Сделай ОДИН рецепт.
-
 Формат:
-<b>Название блюда</b>
+
+<b>Название</b>
 ⏱ Время | 👥 Порции
 1. шаг
 2. шаг
 3. шаг
-4. шаг
-5. шаг
 КБЖУ
 `;
 
@@ -115,7 +140,7 @@ async function generateRecipe(data) {
     {
       modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt/latest`,
       messages: [{ role: "user", text: prompt }],
-      completionOptions: { temperature: 0.6, maxTokens: 500 }
+      completionOptions: { temperature: 0.6, maxTokens: 700 }
     },
     {
       headers: {
@@ -128,86 +153,97 @@ async function generateRecipe(data) {
   return res.data.result.alternatives[0].message.text;
 }
 
-// ===== WEBHOOK =====
+/* ================= PAYMENT ================= */
+async function createPayment(userId) {
+  const payment = await checkout.createPayment({
+    amount: { value: "349.00", currency: "RUB" },
+    confirmation: {
+      type: "redirect",
+      return_url: "https://t.me/your_bot"
+    },
+    description: "Подписка на рецепты (30 дней)",
+    metadata: { userId }
+  });
+
+  return payment.confirmation.confirmation_url;
+}
+
+/* ================= WEBHOOKS ================= */
+app.post("/yookassa", (req, res) => {
+  if (req.body.event === "payment.succeeded") {
+    const userId = req.body.object.metadata.userId;
+    const until = Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+    db.run(
+      `INSERT OR REPLACE INTO subscriptions VALUES (?, ?)`,
+      [userId, until]
+    );
+  }
+  res.send("ok");
+});
+
+/* ================= TELEGRAM ================= */
 app.post("/webhook", async (req, res) => {
   res.send("ok");
-  const update = req.body;
+  const u = req.body;
 
-  const msg = update.message;
-  const cb = update.callback_query;
+  if (u.message?.text) {
+    const chatId = u.message.chat.id;
+    const userId = u.message.from.id;
+    const text = u.message.text;
 
-  if (msg?.text === "/start") {
-    await send(msg.chat.id, "👋 Пришли продукты голосом или текстом через запятую");
-    return;
+    if (text === "/start") {
+      return send(chatId, "👨‍🍳 Пришли продукты через запятую");
+    }
+
+    state[userId] = { products: text };
+    return send(chatId, "🍽 Тип питания:", dietKeyboard);
   }
 
-  if (msg?.text && msg.text.includes(",")) {
-    state[msg.from.id] = {
-      products: msg.text,
-      chatId: msg.chat.id
-    };
-    await send(msg.chat.id, "🍽 Выбери тип питания:", dietKeyboard());
-    return;
-  }
+  if (u.callback_query) {
+    const { id, data, from, message } = u.callback_query;
+    const chatId = message.chat.id;
+    const userId = from.id;
 
-  if (msg?.voice) {
-    const fileId = msg.voice.file_id;
-    const file = await axios.get(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
-    const url = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.data.result.file_path}`;
-    const audio = await axios.get(url, { responseType: "arraybuffer" });
-    const text = await speechToText(audio.data);
-
-    state[msg.from.id] = { products: text, chatId: msg.chat.id };
-    await send(msg.chat.id, `🧺 Ты сказал:\n<b>${text}</b>\n\nВыбери тип питания:`, dietKeyboard());
-    return;
-  }
-
-  if (cb) {
-    const userId = cb.from.id;
-    const chatId = cb.message.chat.id;
-    const data = cb.data;
-
-    await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
-      callback_query_id: cb.id
+    await axios.post(`${TG}/answerCallbackQuery`, {
+      callback_query_id: id
     });
 
-    const s = state[userId];
-    if (!s) return send(chatId, "❗ Начни сначала");
+    const sub = await hasSubscription(userId);
 
     if (data.startsWith("diet_")) {
       const diet = data.replace("diet_", "");
-      if (["slim", "fast"].includes(diet) && !subscriptions[userId]) {
-        return send(chatId, "🔒 Этот режим доступен по подписке");
+      if ((diet === "slim" || diet === "fast") && !sub) {
+        return send(chatId, "🔒 Только по подписке");
       }
-      s.diet = diet;
-      return send(chatId, "⏱ Максимальное время готовки?", timeKeyboard());
+      state[userId].diet = diet;
+      return send(chatId, "⏱ Время готовки:", timeKeyboard());
     }
 
     if (data.startsWith("time_")) {
-      s.time = data.replace("time_", "");
-      return send(chatId, "👥 На сколько персон готовим?", personsKeyboard());
+      state[userId].time = data.replace("time_", "");
+      return send(chatId, "👥 Количество персон:", personsKeyboard());
     }
 
     if (data.startsWith("p_")) {
-      s.persons = data.replace("p_", "");
-      await send(chatId, "👨‍🍳 Готовлю рецепт…");
-      const recipe = await generateRecipe(s);
-      await send(chatId, recipe, againKeyboard(subscriptions[userId]));
-      return;
+      state[userId].persons = data.replace("p_", "");
+      const recipe = await generateRecipe(state[userId]);
+      delete state[userId];
+      return send(chatId, recipe, afterRecipeKeyboard(sub));
     }
 
     if (data === "again") {
-      await send(chatId, "👨‍🍳 Готовлю другой рецепт…");
-      const recipe = await generateRecipe(s);
-      return send(chatId, recipe, againKeyboard(true));
+      return send(chatId, "🍽 Пришли продукты заново");
     }
 
     if (data === "paywall") {
-      return send(chatId, "💳 Подписка 349₽/мес\n(здесь будет оплата)");
+      const url = await createPayment(userId);
+      return send(chatId, "💳 Подписка 349₽", {
+        inline_keyboard: [[{ text: "Оплатить", url }]]
+      });
     }
   }
 });
 
-// ===== START =====
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Bot started on", PORT));
+app.get("/", (_, res) => res.send("OK"));
+app.listen(PORT, () => console.log("Bot started"));
