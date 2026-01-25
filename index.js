@@ -241,6 +241,10 @@ app.post("/webhook", async (req, res) => {
   const u = req.body;
 
     /* ================= KITCHEN BUTTONS ================= */
+if (state[userId]?.products && !u.message.text.startsWith("/")) {
+  state[userId].products += ", " + u.message.text;
+  return send(chatId, "✅ Продукты добавлены. Продолжаем 👌", dietKeyboardWithAdd);
+}
 
   if (u.message?.text) {
     const chatId = u.message.chat.id;
@@ -404,6 +408,12 @@ app.post("/webhook", async (req, res) => {
   );
 
   return send(chatId, "⭐ Рецепт добавлен в избранное!");
+}
+if (data === "add_products") {
+  return send(
+    chatId,
+    "➕ Напиши продукты, которые хочешь добавить (через запятую)"
+  );
 }
 
     }
