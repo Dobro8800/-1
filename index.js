@@ -11,8 +11,6 @@ const {
   YANDEX_GPT_API_KEY,
   YANDEX_FOLDER_ID,
   YANDEX_STT_API_KEY,
-  YOOKASSA_SHOP_ID,
-  YOOKASSA_SECRET_KEY,
   PORT = 3000
 } = process.env;
 
@@ -27,8 +25,6 @@ db.serialize(() => {
 
 /* ================= STATE ================= */
 const state = {};
-let dailyTip = null;
-let dailyTipDate = null;
 
 /* ================= HELPERS ================= */
 async function send(chatId, text, keyboard = null) {
@@ -55,7 +51,7 @@ function canUseFree(userId) {
 
 function incUsage(userId) {
   db.run(
-    `INSERT INTO usage(user_id, count) VALUES(?,1)
+    `INSERT INTO usage(user_id,count) VALUES(?,1)
      ON CONFLICT(user_id) DO UPDATE SET count = count + 1`,
     [userId]
   );
@@ -64,80 +60,129 @@ function incUsage(userId) {
 /* ================= KEYBOARDS ================= */
 const dietKeyboard = {
   inline_keyboard: [
-    [{ text: "🥘 Обычное", callback_data: "diet_normal" }, { text: "🥗 ПП", callback_data: "diet_healthy" }],
-    [{ text: "🌱 Веган", callback_data: "diet_vegan" }],
-    [{ text: "🔥 Похудеть 🔒", callback_data: "diet_slim" }]
+    [
+      { text: "🥘 Обычное", callback_data: "diet_normal" },
+      { text: "🥗 ПП 🔒", callback_data: "diet_pp" }
+    ],
+    [
+      { text: "🌱 Веган", callback_data: "diet_vegan" },
+      { text: "🔥 Похудеть 🔒", callback_data: "diet_slim" }
+    ]
   ]
 };
 
-const timeKeyboard = () => ({
-  inline_keyboard: [[{ text: "⏱ до 30 мин", callback_data: "time_30" }, { text: "⏱ до 60 мин", callback_data: "time_60" }]]
-});
+const timeKeyboard = {
+  inline_keyboard: [
+    [
+      { text: "⏱ до 15 мин", callback_data: "time_15" },
+      { text: "⏱ до 30 мин", callback_data: "time_30" }
+    ],
+    [{ text: "⏱ до 60 мин", callback_data: "time_60" }]
+  ]
+};
 
-const personsKeyboard = () => ({
-  inline_keyboard: [[{ text: "👤 1", callback_data: "p_1" }, { text: "👥 2", callback_data: "p_2" }]]
-});
+const personsKeyboard = {
+  inline_keyboard: [
+    [
+      { text: "👤 1", callback_data: "p_1" },
+      { text: "👥 2", callback_data: "p_2" }
+    ],
+    [
+      { text: "👨‍👩‍👧 3", callback_data: "p_3" },
+      { text: "👨‍👩‍👧‍👦 4", callback_data: "p_4" }
+    ]
+  ]
+};
 
-/* ================= YANDEX ================= */
+function afterRecipeKeyboard(hasSub) {
+  if (!hasSub) {
+    return {
+      inline_keyboard: [
+        [{ text: "🔒 Подписка — больше рецептов", callback_data: "paywall" }]
+      ]
+    };
+  }
+  return {
+    inline_keyboard: [
+      [{ text: "🔁 Ещё рецепт", callback_data: "again" }]
+    ]
+  };
+}
+
+/* ================= STT ================= */
+async function recognizeVoice(fileId) {
+  const fileRes = await axios.get(`${TG}/getFile?file_id=${fileId}`);
+  const filePath = fileRes.data.result.file_path;
+  const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+
+  const audio = await axios.get(fileUrl, { responseType: "arraybuffer" });
+
+  const res = await axios.post(
+    "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
+    audio.data,
+    {
+      headers: {
+        Authorization: `Api-Key ${YANDEX_STT_API_KEY}`,
+        "Content-Type": "application/octet-stream"
+      },
+      params: { lang: "ru-RU" }
+    }
+  );
+
+  return res.data.result;
+}
+
+/* ================= GPT ================= */
 async function generateRecipe(data) {
   const prompt = `
-Ты — виртуальный шеф-повар НейроШеф.
+Ты — виртуальный шеф-повар по имени НейроШеф.
 
 Продукты: ${data.products}
 Тип питания: ${data.diet}
-Время: ${data.time}
-Персон: ${data.persons}
+Время готовки: ${data.time}
+Количество персон: ${data.persons}
 
-Можно использовать не все продукты.
+Правила:
+- Можно использовать не все продукты
+- Максимум 5 шагов приготовления
+- Укажи сложность по шкале 1–5
+- КБЖУ рассчитай ПРИМЕРНО
+- Используй эмодзи умеренно
 
 Формат:
-<b>👨‍🍳 Название</b>
 
-⭐ Сложность: X/5
-⏱ Время:
-👥 Порции:
+<b>👨‍🍳 Название блюда</b>
 
-<b>🧺 Ингредиенты</b>
-• ...
+⭐ Сложность: X/5  
+⏱ Время:  
+👥 Порции:  
 
-<b>🔥 Приготовление</b>
-1️⃣ ...
+<b>🧺 Ингредиенты:</b>
+• …
 
-<b>📊 КБЖУ</b>
+<b>🔥 Приготовление:</b>
+1️⃣ …
+2️⃣ …
+3️⃣ …
+4️⃣ …
+5️⃣ …
 
-<b>💡 Совет от НейроШефа</b>
+<b>📊 КБЖУ (примерно):</b>
+Ккал | Белки | Жиры | Углеводы
+
+<b>💡 Совет от НейроШефа:</b>
 `;
-
   const res = await axios.post(
     "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
     {
       modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt/latest`,
       messages: [{ role: "user", text: prompt }],
-      completionOptions: { temperature: 0.7, maxTokens: 800 }
+      completionOptions: { temperature: 0.7, maxTokens: 900 }
     },
     { headers: { Authorization: `Api-Key ${YANDEX_GPT_API_KEY}` } }
   );
 
   return res.data.result.alternatives[0].message.text;
-}
-
-async function getDailyTip() {
-  const today = new Date().toDateString();
-  if (dailyTipDate === today) return dailyTip;
-
-  const res = await axios.post(
-    "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
-    {
-      modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt/latest`,
-      messages: [{ role: "user", text: "Дай короткий кулинарный совет от шеф-повара" }],
-      completionOptions: { temperature: 0.6, maxTokens: 100 }
-    },
-    { headers: { Authorization: `Api-Key ${YANDEX_GPT_API_KEY}` } }
-  );
-
-  dailyTip = res.data.result.alternatives[0].message.text;
-  dailyTipDate = today;
-  return dailyTip;
 }
 
 /* ================= TELEGRAM ================= */
@@ -150,11 +195,15 @@ app.post("/webhook", async (req, res) => {
     const userId = u.message.from.id;
 
     if (u.message.text === "/start") {
-      const tip = await getDailyTip();
-      return send(chatId,
-        `👨‍🍳 Привет! Я <b>НейроШеф</b>\n\n` +
-        `Пришли продукты текстом или голосом.\n\n` +
-        `<b>💡 Совет дня:</b>\n${tip}`
+      return send(
+        chatId,
+        `👨‍🍳 Привет! Я <b>НейроШеф</b> 🤖  
+
+Пришли продукты:
+✍️ текстом через запятую  
+🎙 или голосовым сообщением  
+
+Я сам подберу лучший рецепт 👌`
       );
     }
 
@@ -162,35 +211,61 @@ app.post("/webhook", async (req, res) => {
     return send(chatId, "🍽 Выбери тип питания:", dietKeyboard);
   }
 
+  if (u.message?.voice) {
+    const chatId = u.message.chat.id;
+    const userId = u.message.from.id;
+
+    const text = await recognizeVoice(u.message.voice.file_id);
+    await send(chatId, `🎙 Я услышал:\n<b>${text}</b>`);
+
+    state[userId] = { products: text };
+    return send(chatId, "🍽 Выбери тип питания:", dietKeyboard);
+  }
+
   if (u.callback_query) {
     const { data, from, message, id } = u.callback_query;
     const chatId = message.chat.id;
     const userId = from.id;
+
     await axios.post(`${TG}/answerCallbackQuery`, { callback_query_id: id });
 
+    const sub = await hasSubscription(userId);
+
     if (data.startsWith("diet_")) {
+      if (["pp", "slim"].includes(data.replace("diet_", "")) && !sub) {
+        return send(chatId, "🔒 Этот режим доступен по подписке");
+      }
       state[userId].diet = data.replace("diet_", "");
-      return send(chatId, "⏱ Время готовки:", timeKeyboard());
+      return send(chatId, "⏱ Время готовки:", timeKeyboard);
     }
 
     if (data.startsWith("time_")) {
       state[userId].time = data.replace("time_", "");
-      return send(chatId, "👥 Количество персон:", personsKeyboard());
+      return send(chatId, "👥 Количество персон:", personsKeyboard);
     }
 
     if (data.startsWith("p_")) {
-      const sub = await hasSubscription(userId);
       const free = await canUseFree(userId);
       if (!sub && !free) {
         return send(chatId, "🔒 Лимит бесплатных рецептов исчерпан");
       }
 
-      await send(chatId, "👨‍🍳 НейроШеф готовит рецепт...");
-      const recipe = await generateRecipe({ ...state[userId], persons: data.replace("p_", "") });
+      state[userId].persons = data.replace("p_", "");
+      await send(chatId, "👨‍🍳 НейроШеф готовит рецепт... 🔥");
 
+      const recipe = await generateRecipe(state[userId]);
       if (!sub) incUsage(userId);
+
       delete state[userId];
-      return send(chatId, recipe);
+      return send(chatId, recipe, afterRecipeKeyboard(sub));
+    }
+
+    if (data === "again") {
+      return send(chatId, "🍳 Пришли продукты заново — текстом или голосом");
+    }
+
+    if (data === "paywall") {
+      return send(chatId, "🔒 Подписка скоро будет подключена 😉");
     }
   }
 });
