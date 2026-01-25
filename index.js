@@ -15,7 +15,7 @@ const {
 } = process.env;
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
-const OWNER_ID = Yar0slavcev; // ← ВСТАВЬ СВОЙ TELEGRAM ID
+const OWNER_ID = 5030758337; // ← ВСТАВЬ СВОЙ TELEGRAM ID
 
 /* ================= DB ================= */
 const db = new sqlite3.Database("./db.sqlite");
