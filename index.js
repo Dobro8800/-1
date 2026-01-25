@@ -6,102 +6,100 @@ app.use(express.json({ limit: "20mb" }));
 
 // ===== ENV =====
 const BOT_TOKEN = process.env.BOT_TOKEN;
-if (!BOT_TOKEN) throw new Error("BOT_TOKEN is not defined");
-
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 const YANDEX_GPT_API_KEY = process.env.YANDEX_GPT_API_KEY;
-if (!YANDEX_GPT_API_KEY) throw new Error("YANDEX_GPT_API_KEY is not defined");
-
 const YANDEX_STT_API_KEY = process.env.YANDEX_STT_API_KEY;
-if (!YANDEX_STT_API_KEY) throw new Error("YANDEX_STT_API_KEY is not defined");
-
 const YANDEX_FOLDER_ID = process.env.YANDEX_FOLDER_ID;
-if (!YANDEX_FOLDER_ID) throw new Error("YANDEX_FOLDER_ID is not defined");
+
+if (!BOT_TOKEN || !YANDEX_GPT_API_KEY || !YANDEX_STT_API_KEY || !YANDEX_FOLDER_ID) {
+  throw new Error("ENV variables are missing");
+}
 
 // ===== USER STATE =====
 const state = {};
+const subscriptions = {}; // mock подписок
 
-// ===== HEALTH CHECK =====
-app.get("/", (req, res) => {
-  res.send("OK");
+// ===== HEALTH =====
+app.get("/", (_, res) => res.send("OK"));
+
+// ===== SEND MESSAGE =====
+async function send(chatId, text, keyboard = null) {
+  const payload = { chat_id: chatId, text, parse_mode: "HTML" };
+  if (keyboard) payload.reply_markup = keyboard;
+  await axios.post(`${TELEGRAM_API}/sendMessage`, payload);
+}
+
+// ===== KEYBOARDS =====
+const dietKeyboard = () => ({
+  inline_keyboard: [
+    [{ text: "🥘 Обычное", callback_data: "diet_normal" }],
+    [{ text: "🥗 ПП", callback_data: "diet_healthy" }],
+    [{ text: "🌱 Веган", callback_data: "diet_vegan" }],
+    [
+      { text: "🔥 Похудеть 🔒", callback_data: "diet_slim" },
+      { text: "⚡ Быстро 🔒", callback_data: "diet_fast" }
+    ]
+  ]
 });
 
-// ===== TELEGRAM SEND =====
-async function send(chatId, text, keyboard = null) {
-  const payload = {
-    chat_id: chatId,
-    text,
-    parse_mode: "HTML"
-  };
-  if (keyboard) payload.reply_markup = keyboard;
+const timeKeyboard = () => ({
+  inline_keyboard: [
+    [
+      { text: "⚡ До 15 мин", callback_data: "time_15" },
+      { text: "⏱ До 30 мин", callback_data: "time_30" }
+    ],
+    [{ text: "🍳 До 60 мин", callback_data: "time_60" }]
+  ]
+});
 
-  try {
-    await axios.post(`${TELEGRAM_API}/sendMessage`, payload);
-  } catch (error) {
-    console.error("Failed to send message:", error.response?.data || error.message);
-    throw error;
-  }
-}
-
-// ===== KEYBOARD =====
-function dietKeyboard() {
-  return {
-    inline_keyboard: [
-      [
-        { text: "🥘 Обычное", callback_data: "diet_normal" },
-        { text: "🥗 ПП", callback_data: "diet_healthy" }
-      ],
-      [{ text: "🌱 Веган", callback_data: "diet_vegan" }],
-      [
-        { text: "🔥 Похудеть", callback_data: "diet_slim" },
-        { text: "⚡ Быстро", callback_data: "diet_fast" }
-      ]
+const personsKeyboard = () => ({
+  inline_keyboard: [
+    [
+      { text: "👤 1", callback_data: "p_1" },
+      { text: "👥 2", callback_data: "p_2" },
+      { text: "👨‍👩‍👧‍👦 4", callback_data: "p_4" }
     ]
-  };
-}
+  ]
+});
 
-// ===== SPEECHKIT STT =====
-async function speechToText(oggBuffer) {
-  try {
-    const res = await axios.post(
-      "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
-      oggBuffer,
-      {
-        headers: {
-          Authorization: `Api-Key ${YANDEX_STT_API_KEY}`,
-          "Content-Type": "audio/ogg"
-        },
-        params: {
-          folderId: YANDEX_FOLDER_ID,
-          lang: "ru-RU"
-        },
-        timeout: 10000
-      }
-    );
+const againKeyboard = (hasSub) => ({
+  inline_keyboard: [
+    hasSub
+      ? [{ text: "🔁 Другой рецепт", callback_data: "again" }]
+      : [{ text: "🔒 Другой рецепт (подписка)", callback_data: "paywall" }]
+  ]
+});
 
-    if (!res.data.result) {
-      throw new Error("Yandex STT returned empty result");
+// ===== STT =====
+async function speechToText(buffer) {
+  const res = await axios.post(
+    "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
+    buffer,
+    {
+      headers: {
+        Authorization: `Api-Key ${YANDEX_STT_API_KEY}`,
+        "Content-Type": "audio/ogg"
+      },
+      params: { folderId: YANDEX_FOLDER_ID, lang: "ru-RU" }
     }
-
-    return res.data.result.trim();
-  } catch (error) {
-    console.error("STT Error:", error.response?.data || error.message);
-    throw new Error("Не удалось распознать речь. Попробуйте повторить.");
-  }
+  );
+  return res.data.result;
 }
 
-// ===== YANDEX GPT - ИСПРАВЛЕННАЯ ВЕРСИЯ =====
-async function generateRecipe(products, diet) {
+// ===== GPT =====
+async function generateRecipe(data) {
   const prompt = `
 Ты профессиональный повар.
 
-Продукты: ${products}
-Тип питания: ${diet}
+Продукты: ${data.products}
+Тип питания: ${data.diet}
+Максимальное время готовки: ${data.time} минут
+Количество персон: ${data.persons}
 
 Сделай ОДИН рецепт.
-Формат строго такой:
 
+Формат:
 <b>Название блюда</b>
 ⏱ Время | 👥 Порции
 1. шаг
@@ -112,186 +110,104 @@ async function generateRecipe(products, diet) {
 КБЖУ
 `;
 
-  try {
-    const res = await axios.post(
-      "https://llm.api.cloud.yandex.net/foundationModels/v1/completion", // ← Исправленный URL
-      {
-        modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt/latest`, // ← Исправленная модель
-        messages: [
-          {
-            role: "user",
-            text: prompt
-          }
-        ],
-        completionOptions: {
-          temperature: 0.6,
-          maxTokens: 600
-        }
-      },
-      {
-        headers: {
-          Authorization: `Api-Key ${YANDEX_GPT_API_KEY}`,
-          "x-folder-id": YANDEX_FOLDER_ID,
-          "Content-Type": "application/json"
-        },
-        timeout: 30000
+  const res = await axios.post(
+    "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
+    {
+      modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt/latest`,
+      messages: [{ role: "user", text: prompt }],
+      completionOptions: { temperature: 0.6, maxTokens: 500 }
+    },
+    {
+      headers: {
+        Authorization: `Api-Key ${YANDEX_GPT_API_KEY}`,
+        "x-folder-id": YANDEX_FOLDER_ID
       }
-    );
-
-    console.log("GPT Response:", JSON.stringify(res.data, null, 2)); // ← Для дебага
-
-    const response = res.data;
-    if (!response.result?.alternatives?.[0]?.message?.text) {
-      console.error("GPT Response structure:", response);
-      throw new Error("Yandex GPT returned invalid response structure");
     }
+  );
 
-    return response.result.alternatives[0].message.text.trim();
-  } catch (error) {
-    console.error("GPT Error Details:", {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status,
-      url: error.config?.url
-    });
-    throw new Error("Не удалось сгенерировать рецепт. Попробуйте позже.");
-  }
+  return res.data.result.alternatives[0].message.text;
 }
 
 // ===== WEBHOOK =====
 app.post("/webhook", async (req, res) => {
-  try {
-    const update = req.body;
-    
-    // Отвечаем Telegram сразу
-    res.send("ok");
+  res.send("ok");
+  const update = req.body;
 
-    // Обрабатываем асинхронно
-    processUpdate(update).catch(error => {
-      console.error("Error processing update:", error);
+  const msg = update.message;
+  const cb = update.callback_query;
+
+  if (msg?.text === "/start") {
+    await send(msg.chat.id, "👋 Пришли продукты голосом или текстом через запятую");
+    return;
+  }
+
+  if (msg?.text && msg.text.includes(",")) {
+    state[msg.from.id] = {
+      products: msg.text,
+      chatId: msg.chat.id
+    };
+    await send(msg.chat.id, "🍽 Выбери тип питания:", dietKeyboard());
+    return;
+  }
+
+  if (msg?.voice) {
+    const fileId = msg.voice.file_id;
+    const file = await axios.get(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
+    const url = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.data.result.file_path}`;
+    const audio = await axios.get(url, { responseType: "arraybuffer" });
+    const text = await speechToText(audio.data);
+
+    state[msg.from.id] = { products: text, chatId: msg.chat.id };
+    await send(msg.chat.id, `🧺 Ты сказал:\n<b>${text}</b>\n\nВыбери тип питания:`, dietKeyboard());
+    return;
+  }
+
+  if (cb) {
+    const userId = cb.from.id;
+    const chatId = cb.message.chat.id;
+    const data = cb.data;
+
+    await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
+      callback_query_id: cb.id
     });
-    
-  } catch (error) {
-    console.error("Webhook error:", error);
-    res.send("ok");
+
+    const s = state[userId];
+    if (!s) return send(chatId, "❗ Начни сначала");
+
+    if (data.startsWith("diet_")) {
+      const diet = data.replace("diet_", "");
+      if (["slim", "fast"].includes(diet) && !subscriptions[userId]) {
+        return send(chatId, "🔒 Этот режим доступен по подписке");
+      }
+      s.diet = diet;
+      return send(chatId, "⏱ Максимальное время готовки?", timeKeyboard());
+    }
+
+    if (data.startsWith("time_")) {
+      s.time = data.replace("time_", "");
+      return send(chatId, "👥 На сколько персон готовим?", personsKeyboard());
+    }
+
+    if (data.startsWith("p_")) {
+      s.persons = data.replace("p_", "");
+      await send(chatId, "👨‍🍳 Готовлю рецепт…");
+      const recipe = await generateRecipe(s);
+      await send(chatId, recipe, againKeyboard(subscriptions[userId]));
+      return;
+    }
+
+    if (data === "again") {
+      await send(chatId, "👨‍🍳 Готовлю другой рецепт…");
+      const recipe = await generateRecipe(s);
+      return send(chatId, recipe, againKeyboard(true));
+    }
+
+    if (data === "paywall") {
+      return send(chatId, "💳 Подписка 349₽/мес\n(здесь будет оплата)");
+    }
   }
 });
-
-// ===== ASYNC UPDATE PROCESSING =====
-async function processUpdate(update) {
-  if (update.message?.text) {
-    const chatId = update.message.chat.id;
-    const userId = update.message.from.id;
-    const text = update.message.text.trim();
-
-    if (text === "/start") {
-      await send(
-        chatId,
-        "👋 Я <b>бот-повар</b>\n\n🎤 Пришли голосом продукты\n✍️ или напиши через запятую"
-      );
-      return;
-    }
-
-    if (text.includes(",")) {
-      state[userId] = { products: text, chatId };
-      await send(chatId, "🍽 Выбери тип питания:", dietKeyboard());
-      return;
-    }
-  }
-
-  if (update.message?.voice) {
-    const chatId = update.message.chat.id;
-    const userId = update.message.from.id;
-    const fileId = update.message.voice.file_id;
-
-    try {
-      const fileRes = await axios.get(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
-      const filePath = fileRes.data.result.file_path;
-      const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
-
-      const audioRes = await axios.get(fileUrl, { responseType: "arraybuffer" });
-      const text = await speechToText(audioRes.data);
-
-      state[userId] = { products: text, chatId };
-
-      await send(
-        chatId,
-        `🧺 Ты сказал:\n<b>${text}</b>\n\nВыбери тип питания:`,
-        dietKeyboard()
-      );
-    } catch (error) {
-      await send(chatId, "❌ Ошибка при обработке голоса. Попробуйте ещё раз.");
-      console.error("Voice processing error:", error);
-    }
-    return;
-  }
-
-  if (update.callback_query) {
-    const cb = update.callback_query;
-    const chatId = cb.message.chat.id;
-    const userId = cb.from.id;
-    const diet = cb.data.replace("diet_", "");
-
-    try {
-      // Отвечаем на callback query
-      await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
-        callback_query_id: cb.id
-      });
-
-      if (!state[userId]) {
-        await send(chatId, "❗ Пришли продукты заново");
-        return;
-      }
-
-      await send(chatId, "👨‍🍳 Готовлю рецепт…");
-
-      const recipe = await generateRecipe(state[userId].products, diet);
-      delete state[userId];
-      await send(chatId, recipe);
-    } catch (error) {
-      await send(chatId, "❌ Ошибка при генерации рецепта. Попробуйте позже.");
-      console.error("Recipe generation error:", error);
-    }
-    return;
-  }
-}
 
 // ===== START =====
 const PORT = process.env.PORT || 3000;
-
-// Добавьте в index.js перед app.listen
-app.get('/debug-yandex', async (req, res) => {
-  console.log('Folder ID:', process.env.YANDEX_FOLDER_ID);
-  console.log('API Key exists:', !!process.env.YANDEX_GPT_API_KEY);
-  
-  try {
-    const response = await axios.post(
-      'https://llm.api.cloud.yandex.net/foundationModels/v1/completion',
-      {
-        modelUri: `gpt://${process.env.YANDEX_FOLDER_ID}/yandexgpt-lite`,
-        messages: [{ role: 'user', text: 'Тест связи' }]
-      },
-      {
-        headers: {
-          'Authorization': `Api-Key ${process.env.YANDEX_GPT_API_KEY}`,
-          'x-folder-id': process.env.YANDEX_FOLDER_ID
-        }
-      }
-    );
-    
-    res.json({ status: 'success', data: response.data });
-  } catch (error) {
-    res.json({ 
-      status: 'error', 
-      error: error.response?.data || error.message,
-      details: {
-        folderId: process.env.YANDEX_FOLDER_ID,
-        apiKeyLength: process.env.YANDEX_GPT_API_KEY?.length
-      }
-    });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log("Bot started on port", PORT);
-});
+app.listen(PORT, () => console.log("Bot started on", PORT));
