@@ -67,6 +67,13 @@ function incUsage(userId) {
 }
 
 /* ================= KEYBOARDS ================= */
+const dietKeyboardWithAdd = {
+  inline_keyboard: [
+    ...dietKeyboard.inline_keyboard,
+    [{ text: "➕ Добавить продукты", callback_data: "add_products" }]
+  ]
+};
+
 const dietKeyboard = {
   inline_keyboard: [
     [
