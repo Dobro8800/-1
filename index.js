@@ -23,6 +23,15 @@ db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS usage (user_id INTEGER PRIMARY KEY, count INTEGER)`);
 });
 
+db.run(`
+  CREATE TABLE IF NOT EXISTS favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    recipe TEXT,
+    created_at INTEGER
+  )
+`);
+
 /* ================= STATE ================= */
 const state = {};
 
@@ -115,6 +124,20 @@ const kitchenMenuKeyboard = {
 
 function afterRecipeKeyboard(hasSub) {
   if (!hasSub) {
+    function recipeActionsKeyboard(hasSub) {
+  const buttons = [
+    [{ text: "⭐ В избранное", callback_data: "fav_add" }]
+  ];
+
+  if (hasSub) {
+    buttons.push([{ text: "🔁 Ещё рецепт", callback_data: "again" }]);
+  } else {
+    buttons.push([{ text: "🔒 Подписка — больше рецептов", callback_data: "paywall" }]);
+  }
+
+  return { inline_keyboard: buttons };
+}
+
     return {
       inline_keyboard: [
         [{ text: "🔒 Подписка — больше рецептов", callback_data: "paywall" }]
@@ -245,6 +268,21 @@ app.post("/webhook", async (req, res) => {
         "👤 Профиль НейроШефа\n\nЗдесь скоро появится статистика и история рецептов 👨‍🍳",
         kitchenEntryKeyboard
       );
+      db.all(
+  `SELECT recipe FROM favorites WHERE user_id=? ORDER BY created_at DESC LIMIT 5`,
+  [userId],
+  (_, rows) => {
+    if (!rows.length) {
+      send(chatId, "⭐ В избранном пока пусто");
+    } else {
+      const list = rows
+        .map((r, i) => `⭐ ${i + 1}. ${r.recipe.split("\n")[0]}`)
+        .join("\n");
+      send(chatId, `⭐ Твои избранные рецепты:\n\n${list}`);
+    }
+  }
+);
+
     }
 
     if (u.message.text === "💳 Подписка") {
@@ -351,6 +389,16 @@ app.post("/webhook", async (req, res) => {
 
     if (data === "paywall") {
       return send(chatId, "🔒 Подписка скоро будет подключена 😉");
+
+      if (data === "fav_add") {
+  db.run(
+    `INSERT INTO favorites(user_id, recipe, created_at) VALUES (?, ?, ?)`,
+    [userId, message.text, Date.now()]
+  );
+
+  return send(chatId, "⭐ Рецепт добавлен в избранное!");
+}
+
     }
   }
 });
