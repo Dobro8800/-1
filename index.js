@@ -67,12 +67,7 @@ function incUsage(userId) {
 }
 
 /* ================= KEYBOARDS ================= */
-const dietKeyboardWithAdd = {
-  inline_keyboard: [
-    ...dietKeyboard.inline_keyboard,
-    [{ text: "➕ Добавить продукты", callback_data: "add_products" }]
-  ]
-};
+
 
 const dietKeyboard = {
   inline_keyboard: [
@@ -86,7 +81,12 @@ const dietKeyboard = {
     ]
   ]
 };
-
+const dietKeyboardWithAdd = {
+  inline_keyboard: [
+    ...dietKeyboard.inline_keyboard,
+    [{ text: "➕ Добавить продукты", callback_data: "add_products" }]
+  ]
+};
 const timeKeyboard = {
   inline_keyboard: [
     [
@@ -128,10 +128,7 @@ const kitchenMenuKeyboard = {
   one_time_keyboard: false
 };
 
-
-function afterRecipeKeyboard(hasSub) {
-  if (!hasSub) {
-    function recipeActionsKeyboard(hasSub) {
+function recipeActionsKeyboard(hasSub) {
   const buttons = [
     [{ text: "⭐ В избранное", callback_data: "fav_add" }]
   ];
@@ -144,6 +141,10 @@ function afterRecipeKeyboard(hasSub) {
 
   return { inline_keyboard: buttons };
 }
+
+
+function afterRecipeKeyboard(hasSub) {
+  if (!hasSub) {
 
     return {
       inline_keyboard: [
@@ -241,10 +242,7 @@ app.post("/webhook", async (req, res) => {
   const u = req.body;
 
     /* ================= KITCHEN BUTTONS ================= */
-if (state[userId]?.products && !u.message.text.startsWith("/")) {
-  state[userId].products += ", " + u.message.text;
-  return send(chatId, "✅ Продукты добавлены. Продолжаем 👌", dietKeyboardWithAdd);
-}
+
 
   if (u.message?.text) {
     const chatId = u.message.chat.id;
@@ -274,11 +272,6 @@ if (state[userId]?.products && !u.message.text.startsWith("/")) {
     }
 
     if (u.message.text === "👤 Профиль") {
-      return send(
-        chatId,
-        "👤 Профиль НейроШефа\n\nЗдесь скоро появится статистика и история рецептов 👨‍🍳",
-        kitchenEntryKeyboard
-      );
       db.all(
   `SELECT recipe FROM favorites WHERE user_id=? ORDER BY created_at DESC LIMIT 5`,
   [userId],
@@ -294,6 +287,12 @@ if (state[userId]?.products && !u.message.text.startsWith("/")) {
   }
 );
 
+      return send(
+        chatId,
+        "👤 Профиль НейроШефа\n\nЗдесь скоро появится статистика и история рецептов 👨‍🍳",
+        kitchenEntryKeyboard
+      );
+      
     }
 
     if (u.message.text === "💳 Подписка") {
@@ -342,6 +341,11 @@ if (state[userId]?.products && !u.message.text.startsWith("/")) {
     }
 
     state[userId] = { products: u.message.text };
+    if (state[userId]?.products && !u.message.text.startsWith("/")) {
+  state[userId].products += ", " + u.message.text;
+  return send(chatId, "✅ Продукты добавлены. Продолжаем 👌", dietKeyboardWithAdd);
+}
+
     return send(chatId, "🍽 Выбери тип питания:", dietKeyboard);
   }
 
@@ -399,14 +403,14 @@ if (state[userId]?.products && !u.message.text.startsWith("/")) {
     }
 
     if (data === "paywall") {
-      return send(chatId, "🔒 Подписка скоро будет подключена 😉");
+  return send(chatId, "🔒 Подписка скоро будет подключена 😉");
+}
 
-      if (data === "fav_add") {
+if (data === "fav_add") {
   db.run(
     `INSERT INTO favorites(user_id, recipe, created_at) VALUES (?, ?, ?)`,
     [userId, message.text, Date.now()]
   );
-
   return send(chatId, "⭐ Рецепт добавлен в избранное!");
 }
 if (data === "add_products") {
