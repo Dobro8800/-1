@@ -118,12 +118,16 @@ const kitchenEntryKeyboard = {
 const kitchenMenuKeyboard = {
   keyboard: [
     [{ text: "🍳 Новый рецепт" }],
-    [{ text: "💡 Совет дня" }, { text: "👤 Профиль" }],
-    [{ text: "💳 Подписка" }, { text: "ℹ️ Помощь" }],
+    [{ text: "🔍 Поиск рецепта" }],
+    [{ text: "⚡ Быстро приготовить" }],
+    [{ text: "🛒 Список покупок" }],
+    [{ text: "👤 Профиль" }, { text: "💳 Подписка" }],
+    [{ text: "ℹ️ Помощь" }],
     [{ text: "⬅️ Назад" }]
   ],
   resize_keyboard: true
 };
+
 
 function recipeActionsKeyboard(hasSub) {
   const buttons = [[{ text: "⭐ В избранное", callback_data: "fav_add" }]];
@@ -197,6 +201,54 @@ async function generateRecipe(data) {
 <b>💡 Совет от НейроШефа</b>
 `;
 
+  async function searchRecipe(query) {
+  const prompt = `
+Ты — профессиональный шеф-повар.
+
+Пользователь ищет рецепт по запросу:
+"${query}"
+
+Правила:
+- Если блюдо существует — дай КЛАССИЧЕСКИЙ рецепт
+- Не выдумывай странные вариации
+- Максимум 5 шагов
+- Укажи сложность 1–5
+- КБЖУ примерно
+- Пиши чётко и понятно
+- Используй эмодзи умеренно
+
+Формат:
+<b>🔍 Название блюда</b>
+
+⭐ Сложность: X/5
+⏱ Время приготовления
+
+<b>🧺 Ингредиенты</b>
+• ...
+
+<b>🔥 Приготовление</b>
+1️⃣ ...
+2️⃣ ...
+3️⃣ ...
+4️⃣ ...
+5️⃣ ...
+
+<b>💡 Совет от НейроШефа</b>
+`;
+
+  const res = await axios.post(
+    "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
+    {
+      modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt/latest`,
+      messages: [{ role: "user", text: prompt }],
+      completionOptions: { temperature: 0.4, maxTokens: 900 }
+    },
+    { headers: { Authorization: `Api-Key ${YANDEX_GPT_API_KEY}` } }
+  );
+
+  return res.data.result.alternatives[0].message.text;
+}
+
   const res = await axios.post(
     "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
     {
@@ -225,6 +277,17 @@ app.post("/webhook", async (req, res) => {
       return send(chatId, "✅ Сообщение отправлено владельцу", kitchenEntryKeyboard);
     }
 
+    if (state[userId]?.search && !u.message.text.startsWith("/")) {
+  const query = u.message.text;
+
+  await send(chatId, "🔍 Ищу рецепт...");
+  const recipe = await searchRecipe(query);
+
+  delete state[userId];
+  return send(chatId, recipe, recipeActionsKeyboard(await hasSubscription(userId)));
+}
+
+    
     if (state[userId]?.products && !u.message.text.startsWith("/")) {
       state[userId].products += ", " + u.message.text;
       return send(chatId, "✅ Продукты добавлены. Продолжаем 👌", dietKeyboardWithAdd);
@@ -251,6 +314,15 @@ app.post("/webhook", async (req, res) => {
     if (u.message.text === "🍳 Новый рецепт") {
       return send(chatId, "🍳 Пришли продукты — текстом или голосом", kitchenEntryKeyboard);
     }
+    
+    if (u.message.text === "🔍 Поиск рецепта") {
+  state[userId] = { search: true };
+  return send(
+    chatId,
+    "🔍 Напиши, какой рецепт хочешь найти\n\nНапример:\n• паста карбонара\n• суп с фрикадельками\n• десерт без сахара"
+  );
+}
+
 
     if (u.message.text === "👤 Профиль") {
       db.all(
