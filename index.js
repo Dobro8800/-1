@@ -201,7 +201,22 @@ async function generateRecipe(data) {
 <b>💡 Совет от НейроШефа</b>
 `;
 
-  async function searchRecipe(query) {
+  
+
+  const res = await axios.post(
+    "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
+    {
+      modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt/latest`,
+      messages: [{ role: "user", text: prompt }],
+      completionOptions: { temperature: 0.4, maxTokens: 900 }
+    },
+    { headers: { Authorization: `Api-Key ${YANDEX_GPT_API_KEY}` } }
+  );
+
+  return res.data.result.alternatives[0].message.text;
+}
+
+async function searchRecipe(query) {
   const prompt = `
 Ты — профессиональный шеф-повар.
 
@@ -235,19 +250,6 @@ async function generateRecipe(data) {
 
 <b>💡 Совет от НейроШефа</b>
 `;
-
-  const res = await axios.post(
-    "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
-    {
-      modelUri: `gpt://${YANDEX_FOLDER_ID}/yandexgpt/latest`,
-      messages: [{ role: "user", text: prompt }],
-      completionOptions: { temperature: 0.4, maxTokens: 900 }
-    },
-    { headers: { Authorization: `Api-Key ${YANDEX_GPT_API_KEY}` } }
-  );
-
-  return res.data.result.alternatives[0].message.text;
-}
 
   const res = await axios.post(
     "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
