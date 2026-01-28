@@ -137,14 +137,20 @@ const kitchenMenuKeyboard = {
 
 
 function recipeActionsKeyboard(hasSub) {
-  const buttons = [[{ text: "⭐ В избранное", callback_data: "fav_add" }]];
+  const buttons = [
+    [{ text: "⭐ В избранное", callback_data: "fav_add" }],
+    [{ text: "🛒 В список покупок", callback_data: "add_to_shop" }]
+  ];
+
   buttons.push(
     hasSub
       ? [{ text: "🔁 Ещё рецепт", callback_data: "again" }]
       : [{ text: "🔒 Подписка — больше рецептов", callback_data: "paywall" }]
   );
+
   return { inline_keyboard: buttons };
 }
+
 
 /* ================= STT ================= */
 async function recognizeVoice(fileId) {
