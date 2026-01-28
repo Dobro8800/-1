@@ -325,6 +325,29 @@ app.post("/webhook", async (req, res) => {
       return send(chatId, "👨‍🍳 Кухня НейроШефа", kitchenMenuKeyboard);
     }
     
+// ❌ Удаление ингредиента из списка покупок
+if (state[userId]?.removeShop) {
+  const index = parseInt(text, 10) - 1;
+  const item = state[userId].shopItems[index];
+
+  if (!item) {
+    return send(chatId, "❌ Неверный номер. Попробуй ещё раз.");
+  }
+
+  db.run(
+    `DELETE FROM shopping_list WHERE rowid=?`,
+    [item.rowid],
+    () => {
+      delete state[userId];
+      send(
+        chatId,
+        `✅ Удалено: <b>${item.item}</b>`,
+        kitchenMenuKeyboard
+      );
+    }
+  );
+  return;
+}
 
     if (u.message.text === "🍳 Новый рецепт") {
       return send(chatId, "🍳 Пришли продукты — текстом или голосом", kitchenEntryKeyboard);
