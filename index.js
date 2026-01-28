@@ -319,6 +319,11 @@ app.post("/webhook", async (req, res) => {
     if (u.message.text === "🍽 На кухню") {
       return send(chatId, "👨‍🍳 Кухня НейроШефа", kitchenMenuKeyboard);
     }
+    
+if (u.message.text === "⬅️ Назад") {
+  state[userId] = {};
+  return send(chatId, "👨‍🍳 Кухня НейроШефа", kitchenMenuKeyboard);
+}
 
     if (u.message.text === "🍳 Новый рецепт") {
       return send(chatId, "🍳 Пришли продукты — текстом или голосом", kitchenEntryKeyboard);
