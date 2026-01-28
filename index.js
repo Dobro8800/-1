@@ -30,6 +30,13 @@ db.serialize(() => {
       created_at INTEGER
     )
   `);
+  db.run(`
+  CREATE TABLE IF NOT EXISTS shopping_list (
+    user_id INTEGER,
+    item TEXT
+  )
+`);
+
 });
 
 /* ================= STATE ================= */
