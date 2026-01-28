@@ -362,6 +362,21 @@ if (u.message.text === "⬅️ Назад") {
       return;
     }
 
+    if (u.message.text === "🛒 Список покупок") {
+  db.all(
+    `SELECT item FROM shopping_list WHERE user_id=?`,
+    [userId],
+    (_, rows) => {
+      const list = rows.length
+        ? rows.map((r, i) => `🛒 ${i + 1}. ${r.item}`).join("\n")
+        : "🛒 Список покупок пуст";
+      send(chatId, list, kitchenMenuKeyboard);
+    }
+  );
+  return;
+}
+
+
     if (u.message.text === "ℹ️ Помощь") {
       state[userId] = { feedback: true };
       return send(chatId, "📩 Напиши сообщение — я передам владельцу", kitchenEntryKeyboard);
@@ -406,7 +421,11 @@ if (u.message.text === "⬅️ Назад") {
     }
 
     if (data.startsWith("p_")) {
-      const free = await canUseFree(userId);
+      if (state[userId].fast) {
+  state[userId].time = "15";
+}
+const recipe = await generateRecipe(state[userId]);
+
       if (!sub && !free) {
         return send(chatId, "🔒 Лимит бесплатных рецептов исчерпан");
       }
@@ -427,6 +446,29 @@ if (u.message.text === "⬅️ Назад") {
       );
       return send(chatId, "⭐ Рецепт добавлен в избранное!");
     }
+
+    if (data === "add_to_shop") {
+  const ingredients = message.text
+    .split("🧺 Ингредиенты")[1]
+    ?.split("🔥")[0]
+    ?.split("\n")
+    .filter(l => l.trim().startsWith("•"))
+    .map(l => l.replace("•", "").trim());
+
+  if (!ingredients) {
+    return send(chatId, "❌ Не удалось извлечь ингредиенты");
+  }
+
+  ingredients.forEach(item => {
+    db.run(
+      `INSERT INTO shopping_list(user_id,item) VALUES(?,?)`,
+      [userId, item]
+    );
+  });
+
+  return send(chatId, "🛒 Ингредиенты добавлены в список покупок!");
+}
+
 
     if (data === "again") {
       return send(chatId, "🍳 Пришли продукты заново", kitchenEntryKeyboard);
