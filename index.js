@@ -328,7 +328,17 @@ if (u.message.text === "⬅️ Назад") {
     if (u.message.text === "🍳 Новый рецепт") {
       return send(chatId, "🍳 Пришли продукты — текстом или голосом", kitchenEntryKeyboard);
     }
-    
+
+    if (u.message.text === "⚡ Быстро приготовить") {
+  state[userId] = {
+    fast: true
+  };
+  return send(
+    chatId,
+    "⚡ Быстрый режим включён!\n\nПришли продукты — я подберу рецепт до 15 минут 👌"
+  );
+}
+
     if (u.message.text === "🔍 Поиск рецепта") {
   state[userId] = { search: true };
   return send(
