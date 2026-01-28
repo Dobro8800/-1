@@ -421,23 +421,26 @@ if (u.message.text === "⬅️ Назад") {
     }
 
     if (data.startsWith("p_")) {
-      if (state[userId].fast) {
-  state[userId].time = "15";
+  const free = await canUseFree(userId);
+  if (!sub && !free) {
+    return send(chatId, "🔒 Лимит бесплатных рецептов исчерпан");
+  }
+
+  state[userId].persons = data.replace("p_", "");
+
+  // ⚡ быстрый режим
+  if (state[userId].fast) {
+    state[userId].time = "15";
+  }
+
+  await send(chatId, "👨‍🍳 НейроШеф готовит рецепт...");
+  const recipe = await generateRecipe(state[userId]);
+
+  if (!sub) incUsage(userId);
+  delete state[userId];
+
+  return send(chatId, recipe, recipeActionsKeyboard(sub));
 }
-const recipe = await generateRecipe(state[userId]);
-
-      if (!sub && !free) {
-        return send(chatId, "🔒 Лимит бесплатных рецептов исчерпан");
-      }
-
-      state[userId].persons = data.replace("p_", "");
-      await send(chatId, "👨‍🍳 НейроШеф готовит рецепт...");
-      const recipe = await generateRecipe(state[userId]);
-
-      if (!sub) incUsage(userId);
-      delete state[userId];
-      return send(chatId, recipe, recipeActionsKeyboard(sub));
-    }
 
     if (data === "fav_add") {
       db.run(
