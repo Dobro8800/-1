@@ -326,6 +326,7 @@ app.post("/webhook", async (req, res) => {
     }
     
 // ❌ Удаление ингредиента из списка покупок
+// ❌ Удаление ингредиента из списка покупок
 if (state[userId]?.removeShop) {
   const index = parseInt(text, 10) - 1;
   const item = state[userId].shopItems[index];
@@ -338,16 +339,42 @@ if (state[userId]?.removeShop) {
     `DELETE FROM shopping_list WHERE rowid=?`,
     [item.rowid],
     () => {
-      delete state[userId];
-      send(
-        chatId,
-        `✅ Удалено: <b>${item.item}</b>`,
-        kitchenMenuKeyboard
+      // 🔄 Загружаем обновлённый список
+      db.all(
+        `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
+        [userId],
+        (_, rows) => {
+          if (!rows.length) {
+            delete state[userId];
+            return send(
+              chatId,
+              "🛒 Список покупок пуст",
+              kitchenMenuKeyboard
+            );
+          }
+
+          // остаёмся в режиме удаления
+          state[userId] = {
+            removeShop: true,
+            shopItems: rows
+          };
+
+          const list = rows
+            .map((r, i) => `🛒 ${i + 1}. ${r.item}`)
+            .join("\n");
+
+          send(
+            chatId,
+            `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить ещё`,
+            kitchenMenuKeyboard
+          );
+        }
       );
     }
   );
   return;
 }
+
 
     if (u.message.text === "🍳 Новый рецепт") {
       return send(chatId, "🍳 Пришли продукты — текстом или голосом", kitchenEntryKeyboard);
