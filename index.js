@@ -130,7 +130,6 @@ const kitchenMenuKeyboard = {
     [{ text: "🛒 Список покупок" }],
     [{ text: "👤 Профиль" }, { text: "💳 Подписка" }],
     [{ text: "ℹ️ Помощь" }],
-    [{ text: "⬅️ Назад" }]
   ],
   resize_keyboard: true
 };
@@ -326,10 +325,6 @@ app.post("/webhook", async (req, res) => {
       return send(chatId, "👨‍🍳 Кухня НейроШефа", kitchenMenuKeyboard);
     }
     
-if (u.message.text === "⬅️ Назад") {
-  state[userId] = {};
-  return send(chatId, "👨‍🍳 Кухня НейроШефа", kitchenMenuKeyboard);
-}
 
     if (u.message.text === "🍳 Новый рецепт") {
       return send(chatId, "🍳 Пришли продукты — текстом или голосом", kitchenEntryKeyboard);
@@ -370,17 +365,29 @@ if (u.message.text === "⬅️ Назад") {
 
     if (u.message.text === "🛒 Список покупок") {
   db.all(
-    `SELECT item FROM shopping_list WHERE user_id=?`,
+    `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
     [userId],
     (_, rows) => {
-      const list = rows.length
-        ? rows.map((r, i) => `🛒 ${i + 1}. ${r.item}`).join("\n")
-        : "🛒 Список покупок пуст";
-      send(chatId, list, kitchenMenuKeyboard);
+      if (!rows.length) {
+        return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
+      }
+
+      state[userId] = { removeShop: true, shopItems: rows };
+
+      const list = rows
+        .map((r, i) => `🛒 ${i + 1}. ${r.item}`)
+        .join("\n");
+
+      send(
+        chatId,
+        `${list}\n\n❌ Напиши номер ингредиента, чтобы удалить его`,
+        kitchenMenuKeyboard
+      );
     }
   );
   return;
 }
+
 
 
     if (u.message.text === "ℹ️ Помощь") {
