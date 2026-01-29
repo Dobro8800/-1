@@ -282,6 +282,64 @@ app.post("/webhook", async (req, res) => {
   const u = req.body;
 
   if (u.message?.text) {
+    if (u.message?.text) {
+  if (u.message?.text) {
+  const text = u.message.text;
+
+  
+// ❌ Удаление ингредиента из списка покупок
+if (state[userId]?.removeShop) {
+  const index = parseInt(text, 10) - 1;
+
+  if (Number.isNaN(index)) {
+    return send(chatId, "❌ Введи номер ингредиента");
+  }
+
+  const item = state[userId].shopItems[index];
+  if (!item) {
+    return send(chatId, "❌ Неверный номер. Попробуй ещё раз.");
+  }
+
+  db.run(
+    `DELETE FROM shopping_list WHERE rowid=? AND user_id=?`,
+    [item.rowid, userId],
+    () => {
+      db.all(
+        `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
+        [userId],
+        (_, rows) => {
+          if (!rows.length) {
+            delete state[userId];
+            return send(
+              chatId,
+              "🛒 Список покупок пуст",
+              kitchenMenuKeyboard
+            );
+          }
+
+          state[userId] = {
+            removeShop: true,
+            shopItems: rows
+          };
+
+          const list = rows
+            .map((r, i) => `🛒 ${i + 1}. ${r.item}`)
+            .join("\n");
+
+          return send(
+            chatId,
+            `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить ещё`,
+            kitchenMenuKeyboard
+          );
+        }
+      );
+    }
+  );
+
+  return; // ⛔ обязательно
+}
+
+
     const chatId = u.message.chat.id;
     const userId = u.message.from.id;
 
