@@ -336,7 +336,7 @@ if (state[userId]?.removeShop) {
   }
 
   db.run(
-    `DELETE FROM shopping_list WHERE rowid=?`,
+    DELETE FROM shopping_list WHERE rowid=? AND user_id=?,
     [item.rowid],
     () => {
       // 🔄 Загружаем обновлённый список
@@ -422,21 +422,54 @@ if (state[userId]?.removeShop) {
         return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
       }
 
-      state[userId] = { removeShop: true, shopItems: rows };
+      // ❌ Удаление ингредиента из списка покупок (ТОП-ПРИОРИТЕТ)
+if (state[userId]?.removeShop) {
+  const index = Number(text) - 1;
 
-      const list = rows
-        .map((r, i) => `🛒 ${i + 1}. ${r.item}`)
-        .join("\n");
+  if (Number.isNaN(index)) {
+    return send(chatId, "❌ Введи номер ингредиента");
+  }
 
-      send(
-        chatId,
-        `${list}\n\n❌ Напиши номер ингредиента, чтобы удалить его`,
-        kitchenMenuKeyboard
+  const item = state[userId].shopItems[index];
+  if (!item) {
+    return send(chatId, "❌ Неверный номер");
+  }
+
+  db.run(
+    `DELETE FROM shopping_list WHERE rowid=? AND user_id=?`,
+    [item.rowid, userId],
+    () => {
+      db.all(
+        `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
+        [userId],
+        (_, rows) => {
+          if (!rows.length) {
+            delete state[userId];
+            return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
+          }
+
+          state[userId] = {
+            removeShop: true,
+            shopItems: rows
+          };
+
+          const list = rows
+            .map((r, i) => `🛒 ${i + 1}. ${r.item}`)
+            .join("\n");
+
+          return send(
+            chatId,
+            `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента для удаления`,
+            kitchenMenuKeyboard
+          );
+        }
       );
     }
   );
-  return;
+
+  return; // ⛔ КРИТИЧЕСКИ ВАЖНО
 }
+
 
 
 
