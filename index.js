@@ -290,7 +290,6 @@ app.post("/webhook", async (req, res) => {
 
     // ❌ Удаление ингредиента из списка покупок
     if (state[userId]?.removeShop) {
-    if (state[userId]?.removeShop) {
   const index = parseInt(text, 10) - 1;
 
   // Если пользователь ввёл НЕ число — выходим из режима удаления
