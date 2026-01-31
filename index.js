@@ -290,49 +290,55 @@ app.post("/webhook", async (req, res) => {
 
     // ❌ Удаление ингредиента из списка покупок
     if (state[userId]?.removeShop) {
-      const index = parseInt(text, 10) - 1;
+    if (state[userId]?.removeShop) {
+  const index = parseInt(text, 10) - 1;
 
-      if (Number.isNaN(index)) {
-        return send(chatId, "❌ Введи номер ингредиента");
+  // Если пользователь ввёл НЕ число — выходим из режима удаления
+  if (Number.isNaN(index)) {
+    delete state[userId].removeShop; // сброс режима
+    return; // дальше текст обработается другими if (командами)
+  }
+
+  const item = state[userId].shopItems[index];
+  if (!item) {
+    return send(chatId, "❌ Неверный номер. Попробуй ещё раз.");
+  }
+
+  // Удаляем выбранный ингредиент
+  db.run(
+    `DELETE FROM shopping_list WHERE rowid=? AND user_id=?`,
+    [item.rowid, userId],
+    function (err) {
+      if (err) {
+        console.error(err);
+        return send(chatId, "❌ Ошибка при удалении из базы данных");
       }
 
-      const item = state[userId].shopItems[index];
-      if (!item) {
-        return send(chatId, "❌ Неверный номер. Попробуй ещё раз.");
-      }
-
-      db.run(
-        `DELETE FROM shopping_list WHERE rowid=? AND user_id=?`,
-        [item.rowid, userId],
-        function (err) {
-          if (err) {
-            console.error(err);
-            return send(chatId, "❌ Ошибка при удалении из базы данных");
+      db.all(
+        `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
+        [userId],
+        function (_, rows) {
+          if (!rows.length) {
+            delete state[userId];
+            return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
           }
 
-          db.all(
-            `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
-            [userId],
-            function (_, rows) {
-              if (!rows.length) {
-                delete state[userId];
-                return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
-              }
+          state[userId] = { removeShop: true, shopItems: rows };
+          const list = rows.map((r, i) => `🛒 ${i + 1}. ${r.item}`).join("\n");
 
-              state[userId] = { removeShop: true, shopItems: rows };
-              const list = rows.map((r, i) => `🛒 ${i + 1}. ${r.item}`).join("\n");
-
-              return send(
-                chatId,
-                `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить ещё`,
-                kitchenMenuKeyboard
-              );
-            }
+          return send(
+            chatId,
+            `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить ещё`,
+            kitchenMenuKeyboard
           );
         }
       );
-      return; // критически важно, чтобы дальше код не шёл
     }
+  );
+
+  return; // важно оставить, чтобы не шли другие if
+}
+
 
     // --- Обратная связь ---
     if (state[userId]?.feedback) {
