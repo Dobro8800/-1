@@ -281,95 +281,83 @@ app.post("/webhook", async (req, res) => {
   res.send("ok");
   const u = req.body;
 
-  if (u.message?.text) {
-    if (u.message?.text) {
-  if (u.message?.text) {
-  const text = u.message.text;
+  const chatId = u.message?.chat?.id || u.callback_query?.message?.chat?.id;
+  const userId = u.message?.from?.id || u.callback_query?.from?.id;
+  const text = u.message?.text;
 
-  
-// ❌ Удаление ингредиента из списка покупок
-if (state[userId]?.removeShop) {
-  const index = parseInt(text, 10) - 1;
+  // --- Текстовые сообщения ---
+  if (text) {
 
-  if (Number.isNaN(index)) {
-    return send(chatId, "❌ Введи номер ингредиента");
-  }
+    // ❌ Удаление ингредиента из списка покупок
+    if (state[userId]?.removeShop) {
+      const index = parseInt(text, 10) - 1;
 
-  const item = state[userId].shopItems[index];
-  if (!item) {
-    return send(chatId, "❌ Неверный номер. Попробуй ещё раз.");
-  }
-
-  db.run(
-    `DELETE FROM shopping_list WHERE rowid=? AND user_id=?`,
-    [item.rowid, userId],
-    function (err) {
-      if (err) {
-        console.error(err);
-        return send(chatId, "❌ Ошибка при удалении из базы данных");
+      if (Number.isNaN(index)) {
+        return send(chatId, "❌ Введи номер ингредиента");
       }
 
-      db.all(
-        `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
-        [userId],
-        function (err, rows) {
+      const item = state[userId].shopItems[index];
+      if (!item) {
+        return send(chatId, "❌ Неверный номер. Попробуй ещё раз.");
+      }
+
+      db.run(
+        `DELETE FROM shopping_list WHERE rowid=? AND user_id=?`,
+        [item.rowid, userId],
+        function (err) {
           if (err) {
             console.error(err);
-            return send(chatId, "❌ Ошибка при чтении базы данных");
+            return send(chatId, "❌ Ошибка при удалении из базы данных");
           }
 
-          if (!rows.length) {
-            delete state[userId];
-            return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
-          }
+          db.all(
+            `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
+            [userId],
+            function (_, rows) {
+              if (!rows.length) {
+                delete state[userId];
+                return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
+              }
 
-          // Обновляем состояние пользователя
-          state[userId] = {
-            removeShop: true,
-            shopItems: rows
-          };
+              state[userId] = { removeShop: true, shopItems: rows };
+              const list = rows.map((r, i) => `🛒 ${i + 1}. ${r.item}`).join("\n");
 
-          const list = rows.map((r, i) => `🛒 ${i + 1}. ${r.item}`).join("\n");
-
-          const message = `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить ещё`;
-
-          return send(chatId, message, kitchenMenuKeyboard);
+              return send(
+                chatId,
+                `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить ещё`,
+                kitchenMenuKeyboard
+              );
+            }
+          );
         }
       );
+      return; // критически важно, чтобы дальше код не шёл
     }
-  );
 
-  return;
-}
-
-
-
-    const chatId = u.message.chat.id;
-    const userId = u.message.from.id;
-
+    // --- Обратная связь ---
     if (state[userId]?.feedback) {
-      await send(OWNER_ID, `📩 Обратная связь от ${userId}:\n\n${u.message.text}`);
+      await send(OWNER_ID, `📩 Обратная связь от ${userId}:\n\n${text}`);
       delete state[userId].feedback;
       return send(chatId, "✅ Сообщение отправлено владельцу", kitchenEntryKeyboard);
     }
 
-    if (state[userId]?.search && !u.message.text.startsWith("/")) {
-  const query = u.message.text;
+    // --- Поиск рецепта ---
+    if (state[userId]?.search && !text.startsWith("/")) {
+      const query = text;
+      await send(chatId, "🔍 Ищу рецепт...");
+      const recipe = await searchRecipe(query);
+      delete state[userId];
+      return send(chatId, recipe, recipeActionsKeyboard(await hasSubscription(userId)));
+    }
 
-  await send(chatId, "🔍 Ищу рецепт...");
-  const recipe = await searchRecipe(query);
-
-  delete state[userId];
-  return send(chatId, recipe, recipeActionsKeyboard(await hasSubscription(userId)));
-}
-
-    
-    if (state[userId]?.products && !u.message.text.startsWith("/")) {
-      state[userId].products += ", " + u.message.text;
+    // --- Добавление продуктов ---
+    if (state[userId]?.products && !text.startsWith("/")) {
+      state[userId].products += ", " + text;
       return send(chatId, "✅ Продукты добавлены. Продолжаем 👌", dietKeyboardWithAdd);
     }
 
-    if (u.message.text === "/start") {
+    // --- Стандартные команды ---
+    if (text === "/start") {
       return send(
         chatId,
         `👨‍🍳 Привет! Я <b>НейроШеф</b> 🤖  
@@ -383,37 +371,31 @@ if (state[userId]?.removeShop) {
       );
     }
 
-    if (u.message.text === "🍽 На кухню") {
+    if (text === "🍽 На кухню") {
       return send(chatId, "👨‍🍳 Кухня НейроШефа", kitchenMenuKeyboard);
     }
-    
 
-
-
-    if (u.message.text === "🍳 Новый рецепт") {
+    if (text === "🍳 Новый рецепт") {
       return send(chatId, "🍳 Пришли продукты — текстом или голосом", kitchenEntryKeyboard);
     }
 
-    if (u.message.text === "⚡ Быстро приготовить") {
-  state[userId] = {
-    fast: true
-  };
-  return send(
-    chatId,
-    "⚡ Быстрый режим включён!\n\nПришли продукты — я подберу рецепт до 15 минут 👌"
-  );
-}
+    if (text === "⚡ Быстро приготовить") {
+      state[userId] = { fast: true };
+      return send(
+        chatId,
+        "⚡ Быстрый режим включён!\n\nПришли продукты — я подберу рецепт до 15 минут 👌"
+      );
+    }
 
-    if (u.message.text === "🔍 Поиск рецепта") {
-  state[userId] = { search: true };
-  return send(
-    chatId,
-    "🔍 Напиши, какой рецепт хочешь найти\n\nНапример:\n• паста карбонара\n• суп с фрикадельками\n• десерт без сахара"
-  );
-}
+    if (text === "🔍 Поиск рецепта") {
+      state[userId] = { search: true };
+      return send(
+        chatId,
+        "🔍 Напиши, какой рецепт хочешь найти\n\nНапример:\n• паста карбонара\n• суп с фрикадельками\n• десерт без сахара"
+      );
+    }
 
-
-    if (u.message.text === "👤 Профиль") {
+    if (text === "👤 Профиль") {
       db.all(
         `SELECT recipe FROM favorites WHERE user_id=? ORDER BY created_at DESC`,
         [userId],
@@ -427,84 +409,45 @@ if (state[userId]?.removeShop) {
       return;
     }
 
-    if (u.message.text === "🛒 Список покупок") {
-  db.all(
-    `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
-    [userId],
-    (_, rows) => {
-      if (!rows.length) {
-        return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
-      }
-
-      // ❌ Удаление ингредиента из списка покупок (ТОП-ПРИОРИТЕТ)
-if (state[userId]?.removeShop) {
-  const index = Number(text) - 1;
-
-  if (Number.isNaN(index)) {
-    return send(chatId, "❌ Введи номер ингредиента");
-  }
-
-  const item = state[userId].shopItems[index];
-  if (!item) {
-    return send(chatId, "❌ Неверный номер");
-  }
-
-  db.run(
-    `DELETE FROM shopping_list WHERE rowid=? AND user_id=?`,
-    [item.rowid, userId],
-    () => {
+    if (text === "🛒 Список покупок") {
       db.all(
         `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
         [userId],
         (_, rows) => {
           if (!rows.length) {
-            delete state[userId];
             return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
           }
-
-          state[userId] = {
-            removeShop: true,
-            shopItems: rows
-          };
-
-          const list = rows
-            .map((r, i) => `🛒 ${i + 1}. ${r.item}`)
-            .join("\n");
-
+          state[userId] = { removeShop: true, shopItems: rows };
+          const list = rows.map((r, i) => `🛒 ${i + 1}. ${r.item}`).join("\n");
           return send(
             chatId,
-            `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента для удаления`,
+            `🛒 Список покупок:\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить`,
             kitchenMenuKeyboard
           );
         }
       );
+      return;
     }
-  );
 
-  return; // ⛔ КРИТИЧЕСКИ ВАЖНО
-}
-
-
-
-
-    if (u.message.text === "ℹ️ Помощь") {
+    if (text === "ℹ️ Помощь") {
       state[userId] = { feedback: true };
       return send(chatId, "📩 Напиши сообщение — я передам владельцу", kitchenEntryKeyboard);
     }
 
-    state[userId] = { products: u.message.text };
+    // --- Если текст не попал под условия ---
+    state[userId] = { products: text };
     return send(chatId, "🍽 Выбери тип питания:", dietKeyboardWithAdd);
   }
 
+  // --- Голосовые сообщения ---
   if (u.message?.voice) {
-    const chatId = u.message.chat.id;
-    const userId = u.message.from.id;
     const text = await recognizeVoice(u.message.voice.file_id);
     await send(chatId, `🎙 Я услышал:\n<b>${text}</b>`);
     state[userId] = { products: text };
     return send(chatId, "🍽 Выбери тип питания:", dietKeyboardWithAdd);
   }
 
+  // --- Callback queries ---
   if (u.callback_query) {
     const { data, from, message, id } = u.callback_query;
     const chatId = message.chat.id;
@@ -513,6 +456,7 @@ if (state[userId]?.removeShop) {
     await axios.post(`${TG}/answerCallbackQuery`, { callback_query_id: id });
     const sub = await hasSubscription(userId);
 
+    // --- Обработка callback ---
     if (data.startsWith("diet_")) {
       if (["pp", "slim"].includes(data.replace("diet_", "")) && !sub) {
         return send(chatId, "🔒 Этот режим доступен по подписке");
@@ -531,26 +475,21 @@ if (state[userId]?.removeShop) {
     }
 
     if (data.startsWith("p_")) {
-  const free = await canUseFree(userId);
-  if (!sub && !free) {
-    return send(chatId, "🔒 Лимит бесплатных рецептов исчерпан");
-  }
+      const free = await canUseFree(userId);
+      if (!sub && !free) {
+        return send(chatId, "🔒 Лимит бесплатных рецептов исчерпан");
+      }
 
-  state[userId].persons = data.replace("p_", "");
+      state[userId].persons = data.replace("p_", "");
+      if (state[userId].fast) state[userId].time = "15";
 
-  // ⚡ быстрый режим
-  if (state[userId].fast) {
-    state[userId].time = "15";
-  }
+      await send(chatId, "👨‍🍳 НейроШеф готовит рецепт...");
+      const recipe = await generateRecipe(state[userId]);
+      if (!sub) incUsage(userId);
+      delete state[userId];
 
-  await send(chatId, "👨‍🍳 НейроШеф готовит рецепт...");
-  const recipe = await generateRecipe(state[userId]);
-
-  if (!sub) incUsage(userId);
-  delete state[userId];
-
-  return send(chatId, recipe, recipeActionsKeyboard(sub));
-}
+      return send(chatId, recipe, recipeActionsKeyboard(sub));
+    }
 
     if (data === "fav_add") {
       db.run(
@@ -561,37 +500,27 @@ if (state[userId]?.removeShop) {
     }
 
     if (data === "add_to_shop") {
-  const ingredients = message.text
-    .split("🧺 Ингредиенты")[1]
-    ?.split("🔥")[0]
-    ?.split("\n")
-    .filter(l => l.trim().startsWith("•"))
-    .map(l => l.replace("•", "").trim());
+      const ingredients = message.text
+        .split("🧺 Ингредиенты")[1]
+        ?.split("🔥")[0]
+        ?.split("\n")
+        .filter(l => l.trim().startsWith("•"))
+        .map(l => l.replace("•", "").trim());
 
-  if (!ingredients) {
-    return send(chatId, "❌ Не удалось извлечь ингредиенты");
-  }
+      if (!ingredients) return send(chatId, "❌ Не удалось извлечь ингредиенты");
 
-  ingredients.forEach(item => {
-    db.run(
-      `INSERT INTO shopping_list(user_id,item) VALUES(?,?)`,
-      [userId, item]
-    );
-  });
+      ingredients.forEach(item => {
+        db.run(`INSERT INTO shopping_list(user_id,item) VALUES(?,?)`, [userId, item]);
+      });
 
-  return send(chatId, "🛒 Ингредиенты добавлены в список покупок!");
-}
-
-
-    if (data === "again") {
-      return send(chatId, "🍳 Пришли продукты заново", kitchenEntryKeyboard);
+      return send(chatId, "🛒 Ингредиенты добавлены в список покупок!");
     }
 
-    if (data === "paywall") {
-      return send(chatId, "🔒 Подписка скоро будет подключена 😉");
-    }
+    if (data === "again") return send(chatId, "🍳 Пришли продукты заново", kitchenEntryKeyboard);
+    if (data === "paywall") return send(chatId, "🔒 Подписка скоро будет подключена 😉");
   }
 });
 
 app.get("/", (_, res) => res.send("OK"));
 app.listen(PORT, () => console.log("👨‍🍳 НейроШеф запущен"));
+      
