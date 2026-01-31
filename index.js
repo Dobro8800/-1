@@ -303,41 +303,45 @@ if (state[userId]?.removeShop) {
   db.run(
     `DELETE FROM shopping_list WHERE rowid=? AND user_id=?`,
     [item.rowid, userId],
-    () => {
+    function (err) {
+      if (err) {
+        console.error(err);
+        return send(chatId, "❌ Ошибка при удалении из базы данных");
+      }
+
       db.all(
         `SELECT rowid, item FROM shopping_list WHERE user_id=?`,
         [userId],
-        (_, rows) => {
-          if (!rows.length) {
-            delete state[userId];
-            return send(
-              chatId,
-              "🛒 Список покупок пуст",
-              kitchenMenuKeyboard
-            );
+        function (err, rows) {
+          if (err) {
+            console.error(err);
+            return send(chatId, "❌ Ошибка при чтении базы данных");
           }
 
+          if (!rows.length) {
+            delete state[userId];
+            return send(chatId, "🛒 Список покупок пуст", kitchenMenuKeyboard);
+          }
+
+          // Обновляем состояние пользователя
           state[userId] = {
             removeShop: true,
             shopItems: rows
           };
 
-          const list = rows
-            .map((r, i) => `🛒 ${i + 1}. ${r.item}`)
-            .join("\n");
+          const list = rows.map((r, i) => `🛒 ${i + 1}. ${r.item}`).join("\n");
 
-          return send(
-            chatId,
-            `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить ещё`,
-            kitchenMenuKeyboard
-          );
+          const message = `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер ингредиента, чтобы удалить ещё`;
+
+          return send(chatId, message, kitchenMenuKeyboard);
         }
       );
     }
   );
 
-  return; // ⛔ обязательно
+  return;
 }
+
 
 
     const chatId = u.message.chat.id;
