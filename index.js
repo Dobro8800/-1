@@ -501,26 +501,26 @@ if (u.message?.text) {
     }
 
     if (data === "add_to_shop") {
-      const ingredients = message.text
-        .split("🧺 Ингредиенты")[1]
-        ?.split("🔥")[0]
-        ?.split("\n")
-        .filter(l => l.trim().startsWith("•"))
-        .map(l => l.replace("•", "").trim());
+  const ingredients = message.text
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l.startsWith("•"))
+    .map(l => l.replace(/^•\s*/, ""));
 
-      if (!ingredients) {
-        return send(chatId, "❌ Не удалось извлечь ингредиенты");
-      }
+  if (!ingredients.length) {
+    return send(chatId, "❌ Не удалось извлечь ингредиенты");
+  }
 
-      ingredients.forEach(item => {
-        db.run(
-          `INSERT INTO shopping_list(user_id,item) VALUES(?,?)`,
-          [userId, item]
-        );
-      });
+  ingredients.forEach(item => {
+    db.run(
+      `INSERT INTO shopping_list(user_id,item) VALUES(?,?)`,
+      [userId, item]
+    );
+  });
 
-      return send(chatId, "🛒 Ингредиенты добавлены в список покупок!");
-    }
+  return send(chatId, "🛒 Ингредиенты добавлены в список покупок!");
+}
+
 
     if (data === "again") {
       delete state[userId];
