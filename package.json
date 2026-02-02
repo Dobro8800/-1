@@ -1,19 +1,19 @@
 {
-  "name": "telegram-recipe-bot",
+  "name": "neurochef-bot",
   "version": "1.0.0",
+  "description": "Telegram bot НейроШеф",
   "type": "module",
-  "engines": {
-    "node": "18.x"
-  },
+  "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "axios": "^1.6.0",
-    "sqlite3": "^5.1.6"
-    "sqlite": "^4.1.0",
-    
-
+    "axios": "^1.6.6",
+    "sqlite3": "^5.1.6",
+    "sqlite": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
