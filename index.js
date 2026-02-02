@@ -292,6 +292,20 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
+if (/^\d+$/.test(text) && !state[userId]?.removeShop) {
+  return send(chatId, "🤔 Я не понял, что означает это число", kitchenMenuKeyboard);
+}
+
+/* 🚫 ЗАЩИТА ОТ ЦИФР ВНЕ КОНТЕКСТА */
+if (/^\d+$/.test(text) && !state[userId]?.removeShop) {
+  return send(
+    chatId,
+    "🤔 Я не понял, что означает это число",
+    kitchenMenuKeyboard
+  );
+}
+
+    
     /* ===== ОБРАТНАЯ СВЯЗЬ ===== */
     if (state[userId]?.feedback) {
       await send(
@@ -368,6 +382,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     if (text === "👤 Профиль") {
+      delete state[userId]; // 🔥 ВАЖНО
       db.all(
         `SELECT recipe FROM favorites WHERE user_id=? ORDER BY created_at DESC`,
         [userId],
