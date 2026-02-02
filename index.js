@@ -149,14 +149,13 @@ function backKeyboard() {
   return { inline_keyboard: [[{ text: "🔙 Назад", callback_data: "menu_back" }]] };
 }
 
-function recipeActionsKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: "⭐ В избранное", callback_data: "fav_add" }],
-      [{ text: "🛒 Добавить в список покупок", callback_data: "add_to_shop" }],
-      [{ text: "🔙 На кухню", callback_data: "menu_back" }]
-    ]
-  };
+function recipeActionsKeyboard(recipeId = null) {
+  const buttons = [
+    [{ text: "⭐ В избранное", callback_data: `fav_add${recipeId ? `_${recipeId}` : ""}` }],
+    [{ text: "🛒 Добавить в список покупок", callback_data: `add_to_shop${recipeId ? `_${recipeId}` : ""}` }],
+    [{ text: "🔙 На кухню", callback_data: "menu_back" }]
+  ];
+  return { inline_keyboard: buttons };
 }
 
 /* ================= STT ================= */
@@ -222,7 +221,6 @@ function extractIngredients(recipe) {
   lines.forEach(line => {
     line = line.trim();
     if (!line) return;
-    // Строки начинающиеся с символов ингредиентов
     if (/^[-•🍅🥕🧄]/.test(line) || /(\d+ ?(г|мл|шт|чайн|стол|пуч))/.test(line)) {
       ingredients.push(line.replace(/^[-•\s]+/, ""));
     }
@@ -259,198 +257,337 @@ async function showProfile(chatId, userId) {
 }
 
 /* ================= ЧАСТЬ 1 ОКОНЧАНИЕ ================= */
+
+/* ================= TELEGRAM ================= */
 app.post("/webhook", async (req, res) => {
   res.send("ok");
   const u = req.body;
-  const chatId = u.message?.chat.id || u.callback_query?.message.chat.id;
-  const userId = u.message?.from.id || u.callback_query?.from.id;
-
-  state[userId] ??= {};
 
   /* ========== TEXT MESSAGES ========== */
   if (u.message?.text) {
+    const chatId = u.message.chat.id;
+    const userId = u.message.from.id;
     const text = u.message.text.trim();
 
-    // Ввод продуктов
+    state[userId] ??= {};
+
+    /* 🚀 ПЕРВЫЙ ВВОД ПРОДУКТОВ И ДОБАВЛЕНИЕ */
     if (state[userId].mode === "products") {
-      if (text === "🍽 На кухню") {
-        delete state[userId];
-        return showMainMenu(chatId);
-      }
+      state[userId].products ??= "";
 
-      state[userId].products = state[userId].products
-        ? state[userId].products + ", " + text
-        : text;
+      // Дублируем текст пользователя
+      await send(chatId, `🎯 Я получил продукты:\n<b>${text}</b>`);
 
-      await send(chatId, `Вы написали:\n<b>${text}</b>`);
+      // Добавляем продукты
+      state[userId].products += state[userId].products ? `, ${text}` : text;
+
       return send(chatId, "🍽 Выберите тип питания:", dietKeyboardWithAdd);
     }
 
-    // Команды
-    if (text === "/start") {
-      delete state[userId];
-      return send(
-        chatId,
-        `👨‍🍳 Привет! Я <b>НейроШеф</b> 🤖  
+    /* 🛒 РЕЖИМ: УДАЛЕНИЕ ИЗ СПИСКА ПОКУПОК */
+    if (state[userId].mode === "removeShop") {
+      const index = parseInt(text, 10) - 1;
 
-Пришли продукты:
-✍️ текстом через запятую  
-🎙 или голосовым сообщением  
+      if (Number.isNaN(index)) {
+        state[userId].mode = null;
+        return send(chatId, "👨‍🍳 Выхожу из режима списка покупок", mainMenuKeyboard());
+      }
 
-Я сам подберу лучший рецепт 👌`,
-        kitchenEntryKeyboard
+      const item = state[userId].shopItems?.[index];
+      if (!item) return send(chatId, "❌ Неверный номер. Попробуй ещё раз.");
+
+      db.run(
+        `DELETE FROM shopping_list WHERE id=? AND user_id=?`,
+        [item.id, userId],
+        () => {
+          db.all(`SELECT id, item, bought FROM shopping_list WHERE user_id=?`, [userId], (_, rows) => {
+            if (!rows.length) {
+              delete state[userId];
+              return send(chatId, "🛒 Список покупок пуст", mainMenuKeyboard());
+            }
+
+            state[userId].shopItems = rows;
+
+            const list = rows
+              .map((r, i) => `${r.bought ? "✅" : "🛒"} ${i + 1}. ${r.item}`)
+              .join("\n");
+
+            return send(chatId, `✅ Удалено: <b>${item.item}</b>\n\n${list}\n\n❌ Напиши номер для удаления\n✍️ Или любой текст для выхода`, mainMenuKeyboard());
+          });
+        }
       );
+      return;
     }
 
-    if (text === "🍽 На кухню") {
+    /* 🔍 РЕЖИМ: ПОИСК */
+    if (state[userId].mode === "search" && !text.startsWith("/")) {
+      await send(chatId, "🔍 Ищу рецепт...");
+      const recipe = await searchRecipe(text);
+
+      delete state[userId];
+      return send(chatId, recipe, recipeActionsKeyboard());
+    }
+
+    /* 📩 РЕЖИМ: ОБРАТНАЯ СВЯЗЬ */
+    if (state[userId].mode === "feedback") {
+      await send(OWNER_ID, `📩 Обратная связь от ${userId}:\n\n${text}`);
+      delete state[userId];
+      return send(chatId, "✅ Сообщение отправлено владельцу", mainMenuKeyboard());
+    }
+
+    /* 🚫 ЗАЩИТА ОТ ЦИФР ВНЕ РЕЖИМА */
+    if (/^\d+$/.test(text)) return send(chatId, "🤔 Я не понял, что означает это число", mainMenuKeyboard());
+
+    /* ===== КОМАНДЫ ===== */
+    if (text === "/start" || text === "🍽 На кухню") {
       delete state[userId];
       return showMainMenu(chatId);
     }
+
+    if (text === "🍳 Новый рецепт") {
+      state[userId] = { mode: "products", products: "" };
+      return send(chatId, "🍳 Пришлите продукты — текстом или голосом", mainMenuKeyboard());
+    }
+
+    if (text === "⚡ Быстро приготовить") {
+      state[userId] = { mode: "products", products: "", fast: true, time: "15" };
+      await send(chatId, "⚡ Вы выбрали быстро приготовить. Время готовки до 15 минут");
+      return send(chatId, "🍽 Пришлите продукты — текстом или голосом", mainMenuKeyboard());
+    }
+
+    if (text === "🔍 Поиск рецепта") {
+      state[userId] = { mode: "search" };
+      return send(chatId, "🔍 Напишите, какой рецепт хотите найти\n\nНапример:\n• паста карбонара\n• суп с фрикадельками", mainMenuKeyboard());
+    }
+
+    if (text === "🛒 Список покупок") {
+      db.all(`SELECT id, item, bought FROM shopping_list WHERE user_id=?`, [userId], (_, rows) => {
+        if (!rows.length) return send(chatId, "🛒 Список покупок пуст", mainMenuKeyboard());
+
+        state[userId] = { mode: "removeShop", shopItems: rows };
+
+        const list = rows.map((r, i) => `${r.bought ? "✅" : "🛒"} ${i + 1}. ${r.item}`).join("\n");
+
+        const keyboard = {
+          inline_keyboard: [
+            ...rows.map((r, i) => [{ text: `${r.bought ? "✅" : "🛒"} ${i + 1}`, callback_data: `shop_toggle_${r.id}` }]),
+            [{ text: "❌ Удалить все", callback_data: "shop_clear" }],
+            [{ text: "🔙 На кухню", callback_data: "menu_back" }]
+          ]
+        };
+
+        return send(chatId, `${list}\n\nВыберите действие:`, keyboard);
+      });
+      return;
+    }
+
+    if (text === "⭐ Избранное") {
+      db.all(`SELECT id, name FROM favorites WHERE user_id=? ORDER BY created_at DESC`, [userId], (_, rows) => {
+        if (!rows.length) return send(chatId, "⭐ У вас пока нет избранных рецептов", mainMenuKeyboard());
+
+        const keyboard = {
+          inline_keyboard: rows.map(r => [
+            { text: r.name.length > 25 ? r.name.slice(0, 25) + "…" : r.name, callback_data: `fav_view_${r.id}` },
+            { text: "❌", callback_data: `fav_del_${r.id}` },
+            { text: "🔁", callback_data: `fav_again_${r.id}` }
+          ]).concat([[{ text: "🔙 На кухню", callback_data: "menu_back" }]])
+        };
+
+        return send(chatId, "⭐ Избранные рецепты:", keyboard);
+      });
+      return;
+    }
+
+    if (text === "ℹ️ Помощь") {
+      state[userId] = { mode: "feedback" };
+      return send(chatId, "📩 Напишите сообщение — я передам владельцу", mainMenuKeyboard());
+    }
   }
 
-  /* ========== VOICE MESSAGES ========== */
+  /* ========== VOICE ========== */
   if (u.message?.voice) {
-    const text = await recognizeVoice(u.message.voice.file_id);
-    state[userId].mode = "products";
-    state[userId].products = state[userId].products
-      ? state[userId].products + ", " + text
-      : text;
+    const chatId = u.message.chat.id;
+    const userId = u.message.from.id;
 
+    const text = await recognizeVoice(u.message.voice.file_id);
+
+    // Дублируем распознанные продукты
     await send(chatId, `🎙 Я услышал:\n<b>${text}</b>`);
+
+    state[userId] ??= {};
+    state[userId].mode = "products";
+    state[userId].products ??= "";
+    state[userId].products += state[userId].products ? `, ${text}` : text;
+
     return send(chatId, "🍽 Выберите тип питания:", dietKeyboardWithAdd);
   }
 
-  /* ========== CALLBACKS ========== */
+  /* ========== CALLBACKS ================= */
   if (u.callback_query) {
-    const { data, message, id } = u.callback_query;
+    const { data, from, message, id } = u.callback_query;
+    const chatId = message.chat.id;
+    const userId = from.id;
 
     await axios.post(`${TG}/answerCallbackQuery`, { callback_query_id: id });
 
-    const sub = await hasSubscription(userId);
-    const free = await canUseFree(userId);
+    state[userId] ??= {};
 
-    // Выбор типа питания
+    if (data === "menu_back") return showMainMenu(chatId);
+
+    /* ================= ДИЕТА ================= */
     if (data.startsWith("diet_")) {
-      if (["pp","slim"].includes(data.replace("diet_","")) && !sub)
+      const sub = await hasSubscription(userId);
+      const dietType = data.replace("diet_", "");
+
+      if (["pp", "slim"].includes(dietType) && !sub) {
         return send(chatId, "🔒 Этот режим доступен по подписке");
-
-      state[userId].diet = data.replace("diet_","");
-      if (state[userId].fast) {
-        state[userId].time = "15";
-        return send(chatId, "⚡ Рецепт будет готов до 15 минут\n👥 Выберите количество персон:", personsKeyboard);
       }
-      return send(chatId, "⏱ Время готовки:", timeKeyboard);
-    }
 
-    // Выбор времени
-    if (data.startsWith("time_")) {
-      state[userId].time = data.replace("time_","");
+      state[userId].diet = dietType;
       return send(chatId, "👥 Количество персон:", personsKeyboard);
     }
 
-    // Выбор персон
+    if (data === "add_products") {
+      return send(chatId, "➕ Напишите продукты, которые хотите добавить");
+    }
+
     if (data.startsWith("p_")) {
-      state[userId].persons = data.replace("p_","");
+      const sub = await hasSubscription(userId);
+      const free = await canUseFree(userId);
       if (!sub && !free) return send(chatId, "🔒 Лимит бесплатных рецептов исчерпан");
 
-      await send(chatId,"👨‍🍳 НейроШеф готовит рецепт...");
+      state[userId].persons = data.replace("p_", "");
+      if (state[userId].fast) state[userId].time = "15";
+
+      await send(chatId, "👨‍🍳 НейроШеф готовит рецепт...");
       const recipe = await generateRecipe(state[userId]);
+
       if (!sub) incUsage(userId);
-      delete state[userId];
+
+      // Сохраняем последнюю генерацию для callback кнопок
+      state[userId].lastRecipe = recipe;
 
       return send(chatId, recipe, recipeActionsKeyboard());
     }
 
-    // Добавить продукты
-    if (data === "add_products") {
-      state[userId].mode = "products";
-      return send(chatId, "➕ Напиши продукты, которые хочешь добавить");
-    }
-
-    // Добавить в избранное
-    if (data === "fav_add") {
-      const lines = message.text.split("\n");
-      const titleLine = lines[0].trim();
-      const name = titleLine.startsWith("🍽") ? titleLine.replace("🍽 ","").slice(0,35) : "Рецепт";
+      /* ================= ИЗБРАННОЕ ================= */
+    if (data.startsWith("fav_add")) {
+      const recipe = state[userId].lastRecipe ?? "";
+      const nameMatch = recipe.match(/🍽\s*(.+)/);
+      const name = nameMatch ? nameMatch[1].split("\n")[0] : "Без названия";
 
       db.run(
-        `INSERT INTO favorites(user_id,name,recipe,created_at) VALUES(?,?,?,?)`,
-        [userId, name, message.text, Date.now()]
+        `INSERT INTO favorites(user_id, name, recipe, created_at) VALUES (?, ?, ?, ?)`,
+        [userId, name, recipe, Date.now()]
       );
-      return send(chatId, "⭐ Рецепт добавлен в избранное!");
+      return send(chatId, `⭐ Рецепт "${name}" добавлен в избранное!`);
     }
 
-    // Добавить в список покупок
-    if (data === "add_to_shop") {
-      const ingredients = extractIngredients(message.text);
-      if (!ingredients.length) return send(chatId,"❌ Не удалось извлечь ингредиенты");
-
-      ingredients.forEach(item => {
-        db.run(`INSERT INTO shopping_list(user_id,item) VALUES(?,?)`,[userId,item]);
-      });
-
-      return send(chatId,"🛒 Ингредиенты добавлены в список покупок!");
+    if (data.startsWith("fav_del_")) {
+      const id = data.split("_")[2];
+      db.run(`DELETE FROM favorites WHERE id=? AND user_id=?`, [id, userId]);
+      return send(chatId, "❌ Рецепт удален из избранного");
     }
 
-      // Быстро приготовить
-    if (data === "menu_fast") {
-      state[userId] = { mode: "products", fast: true, products: "" };
-      return send(chatId,"⚡ Пришли продукты — рецепт будет готов до 15 минут");
-    }
-
-    // На кухню
-    if (data === "menu_back") {
-      delete state[userId];
-      return showMainMenu(chatId);
-    }
-
-    // Новый рецепт
-    if (data === "menu_new") {
-      state[userId] = { mode: "products", products: "" };
-      return send(chatId,"🍳 Пришли продукты — текстом или голосом", kitchenEntryKeyboard);
-    }
-
-    // Поиск рецепта
-    if (data === "menu_search") {
-      state[userId] = { mode:"search" };
-      return send(chatId,"🔍 Напиши, какой рецепт хочешь найти\n\nНапример:\n• паста карбонара\n• суп с фрикадельками");
-    }
-
-    // Список покупок
-    if (data === "menu_shop") {
-      db.all(`SELECT id,item,bought FROM shopping_list WHERE user_id=?`,[userId],(_,rows)=>{
-        if(!rows.length) return send(chatId,"🛒 Список покупок пуст");
-
-        const keyboard = rows.map(r=>[{text:`${r.bought?"✅":"🛒"} ${r.item}`,callback_data:`shop_toggle_${r.id}`}]);
-        keyboard.push([{text:"❌ Удалить все",callback_data:"shop_clear"}]);
-        return send(chatId,"🛒 Ваш список покупок:",{inline_keyboard:keyboard});
+    if (data.startsWith("fav_again_")) {
+      const id = data.split("_")[2];
+      db.get(`SELECT recipe FROM favorites WHERE id=? AND user_id=?`, [id, userId], (_, row) => {
+        if (!row) return send(chatId, "❌ Рецепт не найден");
+        state[userId].lastRecipe = row.recipe;
+        return send(chatId, row.recipe, recipeActionsKeyboard());
       });
     }
 
-    // Избранное
-    if (data === "menu_fav") {
-      db.all(`SELECT id,name FROM favorites WHERE user_id=? ORDER BY created_at DESC`,[userId],(_,rows)=>{
-        if(!rows.length) return send(chatId,"⭐ Избранных рецептов пока нет");
-
-        const keyboard = rows.map(r=>[
-          {text:r.name,callback_data:`fav_${r.id}`},
-          {text:"🔄 Приготовить снова",callback_data:`fav_again_${r.id}`},
-          {text:"❌ Удалить",callback_data:`fav_del_${r.id}`}
-        ]);
-        return send(chatId,"⭐ Ваши избранные рецепты:",{inline_keyboard:keyboard});
+    if (data.startsWith("fav_view_")) {
+      const id = data.split("_")[2];
+      db.get(`SELECT recipe FROM favorites WHERE id=? AND user_id=?`, [id, userId], (_, row) => {
+        if (!row) return send(chatId, "❌ Рецепт не найден");
+        state[userId].lastRecipe = row.recipe;
+        return send(chatId, row.recipe, recipeActionsKeyboard());
       });
     }
 
-    // Профиль
-    if (data === "menu_profile") {
-      return showProfile(chatId,userId);
+    /* ================= СПИСОК ПОКУПОК ================= */
+    if (data.startsWith("shop_toggle_")) {
+      const id = data.split("_")[2];
+      db.get(`SELECT bought FROM shopping_list WHERE id=? AND user_id=?`, [id, userId], (_, row) => {
+        const newBought = row.bought ? 0 : 1;
+        db.run(`UPDATE shopping_list SET bought=? WHERE id=? AND user_id=?`, [newBought, id, userId]);
+
+        db.all(`SELECT id, item, bought FROM shopping_list WHERE user_id=?`, [userId], (_, rows) => {
+          const list = rows.map((r, i) => `${r.bought ? "✅" : "🛒"} ${i + 1}. ${r.item}`).join("\n");
+          const keyboard = {
+            inline_keyboard: [
+              ...rows.map((r, i) => [{ text: `${r.bought ? "✅" : "🛒"} ${i + 1}`, callback_data: `shop_toggle_${r.id}` }]),
+              [{ text: "❌ Удалить все", callback_data: "shop_clear" }],
+              [{ text: "🔙 На кухню", callback_data: "menu_back" }]
+            ]
+          };
+          return send(chatId, list, keyboard);
+        });
+      });
     }
 
-    // TODO: Реакция на удаление/повторение в избранном и список покупок
-    // shop_toggle_{id}, shop_clear, fav_del_{id}, fav_again_{id}
+    if (data === "shop_clear") {
+      db.run(`DELETE FROM shopping_list WHERE user_id=?`, [userId]);
+      return send(chatId, "🗑 Список покупок очищен", mainMenuKeyboard());
+    }
+
+    /* ================= МЕНЮ ================= */
+    if (data.startsWith("menu_")) {
+      switch (data) {
+        case "menu_new":
+          state[userId] = { mode: "products", products: "" };
+          return send(chatId, "🍳 Пришлите продукты — текстом или голосом", mainMenuKeyboard());
+        case "menu_fast":
+          state[userId] = { mode: "products", products: "", fast: true, time: "15" };
+          await send(chatId, "⚡ Быстро приготовить. Время готовки до 15 минут");
+          return send(chatId, "🍽 Пришлите продукты — текстом или голосом", mainMenuKeyboard());
+        case "menu_search":
+          state[userId] = { mode: "search" };
+          return send(chatId, "🔍 Напишите название рецепта для поиска", mainMenuKeyboard());
+        case "menu_shop":
+          db.all(`SELECT id, item, bought FROM shopping_list WHERE user_id=?`, [userId], (_, rows) => {
+            if (!rows.length) return send(chatId, "🛒 Список покупок пуст", mainMenuKeyboard());
+            state[userId] = { mode: "removeShop", shopItems: rows };
+            const list = rows.map((r, i) => `${r.bought ? "✅" : "🛒"} ${i + 1}. ${r.item}`).join("\n");
+            const keyboard = {
+              inline_keyboard: [
+                ...rows.map((r, i) => [{ text: `${r.bought ? "✅" : "🛒"} ${i + 1}`, callback_data: `shop_toggle_${r.id}` }]),
+                [{ text: "❌ Удалить все", callback_data: "shop_clear" }],
+                [{ text: "🔙 На кухню", callback_data: "menu_back" }]
+              ]
+            };
+            return send(chatId, list, keyboard);
+          });
+          break;
+        case "menu_fav":
+          db.all(`SELECT id, name FROM favorites WHERE user_id=? ORDER BY created_at DESC`, [userId], (_, rows) => {
+            if (!rows.length) return send(chatId, "⭐ У вас пока нет избранных рецептов", mainMenuKeyboard());
+            const keyboard = {
+              inline_keyboard: rows.map(r => [
+                { text: r.name.length > 25 ? r.name.slice(0, 25) + "…" : r.name, callback_data: `fav_view_${r.id}` },
+                { text: "❌", callback_data: `fav_del_${r.id}` },
+                { text: "🔁", callback_data: `fav_again_${r.id}` }
+              ]).concat([[{ text: "🔙 На кухню", callback_data: "menu_back" }]])
+            };
+            return send(chatId, "⭐ Избранные рецепты:", keyboard);
+          });
+          break;
+        case "menu_profile":
+          return showProfile(chatId, userId);
+      }
+    }
+
+    /* ================= ТЕСТОВОЕ ПРОДЛЕНИЕ ================= */
+    if (data === "sub_test") {
+      const until = Date.now() + 24 * 60 * 60 * 1000; // +1 день
+      db.run(`INSERT INTO subscriptions(user_id, until) VALUES(?, ?) ON CONFLICT(user_id) DO UPDATE SET until=?`, [userId, until, until]);
+      return send(chatId, "✅ Подписка продлена на 1 день для теста");
+    }
   }
 });
 
 /* ================= SERVER ================= */
-app.get("/",(_,res)=>res.send("OK"));
-app.listen(PORT,()=>console.log("👨‍🍳 НейроШеф запущен"));
+app.get("/", (_, res) => res.send("OK"));
+app.listen(PORT, () => console.log("👨‍🍳 НейроШеф запущен"));
