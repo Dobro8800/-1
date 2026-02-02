@@ -53,30 +53,24 @@ async function send(chatId, text, keyboard = null) {
 
 function hasSubscription(userId) {
   return new Promise(resolve => {
-    db.get(
-      `SELECT until FROM subscriptions WHERE user_id=?`,
-      [userId],
-      (_, row) => resolve(row && row.until > Date.now())
+    db.get(`SELECT until FROM subscriptions WHERE user_id=?`, [userId], (_, row) =>
+      resolve(row && row.until > Date.now())
     );
   });
 }
 
 function canUseFree(userId) {
   return new Promise(resolve => {
-    db.get(
-      `SELECT count FROM usage WHERE user_id=?`,
-      [userId],
-      (_, row) => resolve(!row || row.count < 3)
+    db.get(`SELECT count FROM usage WHERE user_id=?`, [userId], (_, row) =>
+      resolve(!row || row.count < 3)
     );
   });
 }
 
 function getFreeUsage(userId) {
   return new Promise(resolve => {
-    db.get(
-      `SELECT count FROM usage WHERE user_id=?`,
-      [userId],
-      (_, row) => resolve(row ? row.count : 0)
+    db.get(`SELECT count FROM usage WHERE user_id=?`, [userId], (_, row) =>
+      resolve(row ? row.count : 0)
     );
   });
 }
@@ -220,12 +214,21 @@ async function generateRecipe(data) {
   return res.data.result.alternatives[0].message.text;
 }
 
+/* ================= INGREDIENT PARSER ================= */
 function extractIngredients(recipe) {
-  return recipe
-    .split("\n")
-    .map(l => l.trim())
-    .filter(l => /^[-•🍅🥕🧄]/.test(l) || l.includes("г") || l.includes("мл") || l.includes("шт"))
-    .map(l => l.replace(/^[-•\s]+/, ""));
+  const lines = recipe.split("\n");
+  const ingredients = [];
+
+  lines.forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    // Строки начинающиеся с символов ингредиентов
+    if (/^[-•🍅🥕🧄]/.test(line) || /(\d+ ?(г|мл|шт|чайн|стол|пуч))/.test(line)) {
+      ingredients.push(line.replace(/^[-•\s]+/, ""));
+    }
+  });
+
+  return ingredients;
 }
 
 /* ================= TELEGRAM HELPERS ================= */
@@ -256,7 +259,6 @@ async function showProfile(chatId, userId) {
 }
 
 /* ================= ЧАСТЬ 1 ОКОНЧАНИЕ ================= */
-
 app.post("/webhook", async (req, res) => {
   res.send("ok");
   const u = req.body;
@@ -271,6 +273,11 @@ app.post("/webhook", async (req, res) => {
 
     // Ввод продуктов
     if (state[userId].mode === "products") {
+      if (text === "🍽 На кухню") {
+        delete state[userId];
+        return showMainMenu(chatId);
+      }
+
       state[userId].products = state[userId].products
         ? state[userId].products + ", " + text
         : text;
@@ -364,7 +371,7 @@ app.post("/webhook", async (req, res) => {
     if (data === "fav_add") {
       const lines = message.text.split("\n");
       const titleLine = lines[0].trim();
-      const name = titleLine.startsWith("🍽") ? titleLine.replace("🍽 ","") : "Рецепт";
+      const name = titleLine.startsWith("🍽") ? titleLine.replace("🍽 ","").slice(0,35) : "Рецепт";
 
       db.run(
         `INSERT INTO favorites(user_id,name,recipe,created_at) VALUES(?,?,?,?)`,
@@ -385,7 +392,7 @@ app.post("/webhook", async (req, res) => {
       return send(chatId,"🛒 Ингредиенты добавлены в список покупок!");
     }
 
-    // Быстро приготовить
+      // Быстро приготовить
     if (data === "menu_fast") {
       state[userId] = { mode: "products", fast: true, products: "" };
       return send(chatId,"⚡ Пришли продукты — рецепт будет готов до 15 минут");
@@ -414,7 +421,7 @@ app.post("/webhook", async (req, res) => {
       db.all(`SELECT id,item,bought FROM shopping_list WHERE user_id=?`,[userId],(_,rows)=>{
         if(!rows.length) return send(chatId,"🛒 Список покупок пуст");
 
-        const keyboard = rows.map(r=>[{text:`${r.bought?"✅":"🛒"} ${r.item}`,callback_data:`shop_${r.id}`}]);
+        const keyboard = rows.map(r=>[{text:`${r.bought?"✅":"🛒"} ${r.item}`,callback_data:`shop_toggle_${r.id}`}]);
         keyboard.push([{text:"❌ Удалить все",callback_data:"shop_clear"}]);
         return send(chatId,"🛒 Ваш список покупок:",{inline_keyboard:keyboard});
       });
@@ -438,6 +445,9 @@ app.post("/webhook", async (req, res) => {
     if (data === "menu_profile") {
       return showProfile(chatId,userId);
     }
+
+    // TODO: Реакция на удаление/повторение в избранном и список покупок
+    // shop_toggle_{id}, shop_clear, fav_del_{id}, fav_again_{id}
   }
 });
 
