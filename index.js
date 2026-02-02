@@ -425,7 +425,7 @@ if (u.message?.text) {
     state[userId].products
       ? ", " + text
       : text;
-
+);
   return send(chatId, "🍽 Выбери тип питания:", dietKeyboardWithAdd);
 }
 
