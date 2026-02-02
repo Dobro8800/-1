@@ -420,10 +420,12 @@ if (u.message?.text) {
   }
 
   /* 🚀 СТАРТ ГЕНЕРАЦИИ (первый ввод продуктов) */
-  state[userId] = {
-    mode: "products",
-    products: text
-  };
+ if (state[userId]?.mode === "products") {
+  state[userId].products +=
+    state[userId].products
+      ? ", " + text
+      : text;
+
   return send(chatId, "🍽 Выбери тип питания:", dietKeyboardWithAdd);
 }
 
