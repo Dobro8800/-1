@@ -400,7 +400,7 @@ app.post("/webhook", async (req, res) => {
 
     // Другие callback’ы (избранное, список покупок, меню) оставляем как есть
   }
-});
+
 
       /* ================= ИЗБРАННОЕ ================= */
     if (data.startsWith("fav_add")) {
@@ -510,6 +510,8 @@ app.post("/webhook", async (req, res) => {
           return showProfile(chatId, userId);
       }
     }
+  
+});
 
     /* ================= ТЕСТОВОЕ ПРОДЛЕНИЕ ================= */
     if (data === "sub_test") {
