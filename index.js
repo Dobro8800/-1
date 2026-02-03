@@ -403,15 +403,18 @@ app.post("/webhook", async (req, res) => {
 
 
       /* ================= ИЗБРАННОЕ ================= */
+        /* ================= ИЗБРАННОЕ ================= */
     if (data.startsWith("fav_add")) {
       const recipe = state[userId].lastRecipe ?? "";
       const nameMatch = recipe.match(/🍽\s*(.+)/);
       const name = nameMatch ? nameMatch[1].split("\n")[0] : "Без названия";
 
       db.run(
-        `INSERT INTO favorites(user_id, name, recipe, created_at) VALUES (?, ?, ?, ?)`,
+        `INSERT INTO favorites(user_id, name, recipe, created_at)
+         VALUES (?, ?, ?, ?)`,
         [userId, name, recipe, Date.now()]
       );
+
       return send(chatId, `⭐ Рецепт "${name}" добавлен в избранное!`);
     }
 
@@ -423,20 +426,28 @@ app.post("/webhook", async (req, res) => {
 
     if (data.startsWith("fav_again_")) {
       const id = data.split("_")[2];
-      db.get(`SELECT recipe FROM favorites WHERE id=? AND user_id=?`, [id, userId], (_, row) => {
-        if (!row) return send(chatId, "❌ Рецепт не найден");
-        state[userId].lastRecipe = row.recipe;
-        return send(chatId, row.recipe, recipeActionsKeyboard());
-      });
+      db.get(
+        `SELECT recipe FROM favorites WHERE id=? AND user_id=?`,
+        [id, userId],
+        (_, row) => {
+          if (!row) return send(chatId, "❌ Рецепт не найден");
+          state[userId].lastRecipe = row.recipe;
+          return send(chatId, row.recipe, recipeActionsKeyboard());
+        }
+      );
     }
 
     if (data.startsWith("fav_view_")) {
       const id = data.split("_")[2];
-      db.get(`SELECT recipe FROM favorites WHERE id=? AND user_id=?`, [id, userId], (_, row) => {
-        if (!row) return send(chatId, "❌ Рецепт не найден");
-        state[userId].lastRecipe = row.recipe;
-        return send(chatId, row.recipe, recipeActionsKeyboard());
-      });
+      db.get(
+        `SELECT recipe FROM favorites WHERE id=? AND user_id=?`,
+        [id, userId],
+        (_, row) => {
+          if (!row) return send(chatId, "❌ Рецепт не найден");
+          state[userId].lastRecipe = row.recipe;
+          return send(chatId, row.recipe, recipeActionsKeyboard());
+        }
+      );
     }
 
     /* ================= СПИСОК ПОКУПОК ================= */
